@@ -1,0 +1,55 @@
+metadata:
+  name: coremark-pro
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    EEMBC CoreMark-PRO benchmark. Drives the certify-all run and reports the
+    MARK RESULTS TABLE as LAVA measurements: MultiCore and SingleCore scores
+    in iter/s plus the Scaling ratio between them. Optionally reports every
+    row of the WORKLOAD RESULTS TABLE as well. SKIPs cleanly when the
+    CoreMark-PRO tree is not present in the image.
+  os:
+    - linux
+  scope:
+    - performance
+
+params:
+  OUT_DIR: "./logs_CoremarkPro"
+  # CoreMark-PRO source tree (the directory containing builds/ and util/).
+  # Empty means search the suite dir, /opt, /usr/share and $HOME.
+  CMP_DIR: ""
+  # EEMBC TARGET passed to make. linux64 for 64-bit Arm userspace.
+  TARGET: "linux64"
+  # Workers for the multicore pass. NPROC means all online CPUs.
+  CORES: "NPROC"
+  # Override the -c context count; empty derives it from CORES.
+  CONTEXTS: ""
+  # Replace the built-in make invocation entirely, if your image ships
+  # CoreMark-PRO in some other form.
+  RUN_CMD: ""
+  # Parse an existing log instead of running anything.
+  FROM_LOG: ""
+  # Emit a measurement per workload row as well as the overall mark.
+  PER_WORKLOAD: "1"
+  SET_PERF_GOV: "1"
+  # certify-all is long; allow an hour by default.
+  TIMEOUT_SEC: "3600"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/CoremarkPro || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --dir "$CMP_DIR"
+      --target "$TARGET"
+      --cores "$CORES"
+      --contexts "$CONTEXTS"
+      --run-cmd "$RUN_CMD"
+      --from-log "$FROM_LOG"
+      --per-workload "$PER_WORKLOAD"
+      --set-perf-gov "$SET_PERF_GOV"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh CoremarkPro.res'

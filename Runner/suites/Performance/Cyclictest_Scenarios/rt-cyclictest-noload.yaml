@@ -1,0 +1,57 @@
+metadata:
+  name: rt-cyclictest-noload
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Real-time wake-up latency with cyclictest on an otherwise idle system.
+    This is the baseline of the three Cyclictest scenarios: whatever latency
+    appears here is the floor, and the loaded runs are only meaningful when
+    read against it. Reuses the existing Kernel/RT-tests/Cyclictest runner
+    rather than duplicating it, and additionally publishes the per-thread and
+    aggregate min/avg/max latencies to LAVA as measurements in microseconds -
+    the runner already writes result.txt in the emitter's input format.
+  os:
+    - linux
+  scope:
+    - performance
+    - preempt-rt
+
+params:
+  OUT_DIR: "./logs_Cyclictest_NoLoad"
+  INTERVAL: "1000"
+  # SMP breadth: one thread per CPU is the usual real-time figure. Set a
+  # number to pin the thread count instead.
+  THREADS: "NPROC"
+  DURATION: "300s"
+  ITERATIONS: "1"
+  # PRIO and VERBOSE reach the runner through the environment, not a flag:
+  # LAVA exports every param, and the runner reads both as "${PRIO:-98}" /
+  # "${VERBOSE:-0}". They are not in the ./run.sh line below for that reason.
+  PRIO: "98"
+  BINARY: ""
+  VERBOSE: "0"
+  PROGRESS_EVERY: "1"
+  HEARTBEAT_SEC: "10"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Kernel/RT-tests/Cyclictest || exit 0'
+    # NPROC is resolved here rather than in the runner: the runner takes a
+    # plain -t count, and hard-coding one would under-test a big.LITTLE board.
+    - 'NT="$THREADS"; [ "$NT" = "NPROC" ] && NT="$(nproc 2>/dev/null || echo 1)"'
+    - >
+      ./run.sh
+      --out "$OUT_DIR"
+      --interval "$INTERVAL"
+      --threads "$NT"
+      --duration "$DURATION"
+      --iterations "$ITERATIONS"
+      --background-cmd ""
+      --binary "$BINARY"
+      --progress-every "$PROGRESS_EVERY"
+      --heartbeat-sec "$HEARTBEAT_SEC"
+      || true
+    # The runner's result.txt lines are already "<name> pass <value> us".
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/result.txt" || true'
+    - 'if [ -f CyclicTest.res ]; then sed "s/^CyclicTest /Cyclictest-NoLoad /" CyclicTest.res > Cyclictest-NoLoad.res; fi'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-NoLoad.res'

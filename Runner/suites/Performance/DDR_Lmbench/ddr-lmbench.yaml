@@ -1,0 +1,70 @@
+metadata:
+  name: ddr-lmbench
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    DDR bandwidth and latency via lmbench. Runs bw_mem for each requested
+    operation (rd, frd, wr, fwr, bzero, cp, bcopy by default) at a
+    configurable working-set size, and lat_mem_rd for cache and main-memory
+    read latency. Every figure is published to LAVA as a measurement -
+    bandwidth in MB/s, latency in ns. SKIPs cleanly when the lmbench binaries
+    are not present in the image.
+  os:
+    - linux
+  scope:
+    - performance
+
+params:
+  OUT_DIR: "./logs_DDR_Lmbench"
+  # bw_mem working set. Must exceed the last-level cache or the test measures
+  # cache bandwidth rather than DDR.
+  SIZE: "128M"
+  # Operations to run. lmbench also knows rdwr and fcp.
+  BW_OPS: "rd frd wr fwr bzero cp bcopy"
+  RUN_BW: "1"
+  RUN_LAT: "1"
+  # lat_mem_rd sweeps array sizes up to this value using the given stride.
+  LAT_SIZE: "256M"
+  LAT_STRIDE: "128"
+  # Array sizes (in MB, as lat_mem_rd prints them) to report as L1 and L2.
+  L1_SIZE: "0.00098"
+  L2_SIZE: "0.125"
+  ITERATIONS: "3"
+  # bw_mem -P: concurrent processes. 1 measures single-stream bandwidth;
+  # raise it to saturate the memory controller.
+  PARALLELISM: "1"
+  WARMUPS: ""
+  REPETITIONS: ""
+  # Explicit binary paths, or a directory holding both.
+  BW_MEM_BIN: ""
+  LAT_MEM_RD_BIN: ""
+  LMBENCH_DIR: ""
+  SET_PERF_GOV: "1"
+  TIMEOUT_SEC: "900"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/DDR_Lmbench || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --size "$SIZE"
+      --bw-ops "$BW_OPS"
+      --run-bw "$RUN_BW"
+      --run-lat "$RUN_LAT"
+      --lat-size "$LAT_SIZE"
+      --lat-stride "$LAT_STRIDE"
+      --l1-size "$L1_SIZE"
+      --l2-size "$L2_SIZE"
+      --iterations "$ITERATIONS"
+      --parallelism "$PARALLELISM"
+      --warmups "$WARMUPS"
+      --repetitions "$REPETITIONS"
+      --bw-mem-bin "$BW_MEM_BIN"
+      --lat-mem-rd-bin "$LAT_MEM_RD_BIN"
+      --lmbench-dir "$LMBENCH_DIR"
+      --set-perf-gov "$SET_PERF_GOV"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh DDR_Lmbench.res'

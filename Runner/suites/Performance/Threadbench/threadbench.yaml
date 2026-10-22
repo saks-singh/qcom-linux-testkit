@@ -1,0 +1,66 @@
+metadata:
+  name: threadbench
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Threadbench scheduler benchmark. Sweeps a list of thread counts and
+    publishes the tool's throughput or per-operation cost at each count as a
+    LAVA measurement, so the scaling curve across CPUs is visible in the
+    results table. Complements the existing Kernel/Hackbench suite, which
+    covers the process/group side of scheduler load. SKIPs cleanly when no
+    threadbench binary is present; set MODE to perf-sched to use
+    "perf bench sched" instead, which reports under separate case ids because
+    it is a different benchmark.
+  os:
+    - linux
+  scope:
+    - performance
+
+params:
+  OUT_DIR: "./logs_Threadbench"
+  # auto    - use a threadbench binary, SKIP if absent
+  # binary  - require a threadbench binary
+  # perf-sched - run "perf bench sched" instead (different benchmark)
+  MODE: "auto"
+  # Thread counts to sweep. NPROC resolves to all online CPUs.
+  THREADS: "1 2 4 8 NPROC"
+  # Loops passed to the tool; empty uses the tool's own default.
+  LOOPS: ""
+  ITERATIONS: "3"
+  # Flag the binary uses for the thread count. Set to "" for tools that take
+  # a bare positional count.
+  THREAD_ARG: "-t"
+  BINARY: ""
+  THREADBENCH_DIR: ""
+  EXTRA_ARGS: ""
+  # Override the output parser: report the last number on lines containing
+  # this text. Leave empty to try the usual labels (threads/sec, ops/sec,
+  # usecs/op, Total time, ...).
+  METRIC_KEY: ""
+  METRIC_UNITS: ""
+  PERF_SCHED_TESTS: "messaging pipe"
+  SET_PERF_GOV: "1"
+  TIMEOUT_SEC: "600"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Threadbench || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --mode "$MODE"
+      --threads "$THREADS"
+      --loops "$LOOPS"
+      --iterations "$ITERATIONS"
+      --thread-arg "$THREAD_ARG"
+      --binary "$BINARY"
+      --threadbench-dir "$THREADBENCH_DIR"
+      --extra-args "$EXTRA_ARGS"
+      --metric-key "$METRIC_KEY"
+      --metric-units "$METRIC_UNITS"
+      --perf-sched-tests "$PERF_SCHED_TESTS"
+      --set-perf-gov "$SET_PERF_GOV"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Threadbench.res'

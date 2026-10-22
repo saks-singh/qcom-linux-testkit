@@ -1,0 +1,71 @@
+metadata:
+  name: rt-cyclictest-stressng-mem
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Real-time wake-up latency with cyclictest while stress-ng applies a memory
+    workload. This is the scenario that exposes latency caused by memory
+    pressure - page reclaim, TLB and cache thrash, and the allocator's locks -
+    and it is read against rt-cyclictest-noload, not on its own. Reuses the
+    existing Kernel/RT-tests/Cyclictest runner and publishes the latencies to
+    LAVA as measurements in microseconds. SKIPs when stress-ng is absent
+    rather than running unloaded, because an unloaded run reported under this
+    name would read as an excellent result for a test that never happened.
+  os:
+    - linux
+  scope:
+    - performance
+    - preempt-rt
+
+params:
+  OUT_DIR: "./logs_Cyclictest_StressNG_Mem"
+  INTERVAL: "1000"
+  THREADS: "NPROC"
+  DURATION: "300s"
+  ITERATIONS: "1"
+  PRIO: "98"
+  BINARY: ""
+  PROGRESS_EVERY: "1"
+  HEARTBEAT_SEC: "10"
+  # stress-ng memory workers. NPROC spreads one vm worker per CPU.
+  VM_WORKERS: "NPROC"
+  # Per-worker anonymous mapping size. Keep the total well inside RAM: the
+  # intent is sustained memory pressure, not an OOM kill partway through the
+  # run, which would end the load and quietly flatter the latency figures.
+  VM_BYTES: "25%"
+  # Extra stress-ng arguments, appended verbatim.
+  STRESS_EXTRA: "--vm-method all --verify"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Kernel/RT-tests/Cyclictest || exit 0'
+    - 'NT="$THREADS"; [ "$NT" = "NPROC" ] && NT="$(nproc 2>/dev/null || echo 1)"'
+    - 'VW="$VM_WORKERS"; [ "$VW" = "NPROC" ] && VW="$(nproc 2>/dev/null || echo 1)"'
+    # Refuse to mislabel an idle run as a loaded one.
+    - >
+      if ! command -v stress-ng >/dev/null 2>&1; then
+      echo "Cyclictest-StressNG-Mem SKIP" > Cyclictest-StressNG-Mem.res;
+      echo "[SKIP] stress-ng not present; not running cyclictest unloaded under a loaded test name";
+      $REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-StressNG-Mem.res;
+      exit 0;
+      fi
+    # exec replaces the sh -c wrapper, so the PID the runner kills is stress-ng
+    # itself and it reaps its own workers; --timeout is the second belt, in
+    # case the runner is killed before it can stop the load.
+    - 'SECS="$(echo "$DURATION" | tr -dc "0-9")"; [ -n "$SECS" ] || SECS=300'
+    - 'BG="exec stress-ng --vm $VW --vm-bytes $VM_BYTES --timeout $((SECS + 30))s $STRESS_EXTRA"'
+    - >
+      ./run.sh
+      --out "$OUT_DIR"
+      --interval "$INTERVAL"
+      --threads "$NT"
+      --duration "$DURATION"
+      --iterations "$ITERATIONS"
+      --background-cmd "$BG"
+      --binary "$BINARY"
+      --progress-every "$PROGRESS_EVERY"
+      --heartbeat-sec "$HEARTBEAT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/result.txt" || true'
+    - 'if [ -f CyclicTest.res ]; then sed "s/^CyclicTest /Cyclictest-StressNG-Mem /" CyclicTest.res > Cyclictest-StressNG-Mem.res; fi'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-StressNG-Mem.res'

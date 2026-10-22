@@ -1,0 +1,51 @@
+metadata:
+  name: coremark
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    EEMBC CoreMark CPU benchmark. Runs CoreMark ITERATIONS times, reports
+    Iterations/Sec as a LAVA measurement (mean, min, max and stddev), and
+    checks CoreMark's own reporting rules: the self-validation CRC and the
+    minimum 10 second run length required for a score to be quotable.
+    SKIPs cleanly when the coremark binary is not present in the image.
+  os:
+    - linux
+  scope:
+    - performance
+
+params:
+  OUT_DIR: "./logs_Coremark"
+  # Number of CoreMark runs. More runs give a usable stddev; CoreMark itself
+  # is single-shot and fairly repeatable, so 3 is usually enough.
+  ITERATIONS: "3"
+  # Explicit path to the coremark binary; empty means search PATH and the
+  # suite directory.
+  BINARY: ""
+  # Positional arguments passed straight to coremark. The stock binary accepts
+  # e.g. "0x0 0x0 0x66 0 7 1 2000" to control the work loop.
+  EXTRA_ARGS: ""
+  SET_PERF_GOV: "1"
+  # CoreMark run-reporting rules require at least 10 seconds of runtime.
+  MIN_RUNTIME_SEC: "10"
+  # 0 => a short run is reported as skip; 1 => it fails the suite.
+  STRICT_RUNTIME: "0"
+  TIMEOUT_SEC: "600"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Coremark || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --iterations "$ITERATIONS"
+      --binary "$BINARY"
+      --extra-args "$EXTRA_ARGS"
+      --set-perf-gov "$SET_PERF_GOV"
+      --min-runtime-sec "$MIN_RUNTIME_SEC"
+      --strict-runtime "$STRICT_RUNTIME"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    # Per-case results with measurements.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    # Suite-level verdict.
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Coremark.res'

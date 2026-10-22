@@ -1,0 +1,46 @@
+metadata:
+  name: osbench
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    OSBench 1.0.2 operating-system micro-benchmarks. Measures the cost of
+    kernel/OS-layer operations - thread creation, memory allocation and file
+    creation by default, with process creation, program launch and context
+    switching available - and reports the average cost per operation in
+    microseconds as a LAVA measurement (mean, min, max). Each sub-benchmark
+    is resolved independently, so a missing binary skips only that case.
+  os:
+    - linux
+  scope:
+    - performance
+
+params:
+  OUT_DIR: "./logs_OSBench"
+  # Thread, memory and file layers. Add create_processes, launch_programs or
+  # context_switch for the full OSBench set.
+  TESTS: "create_threads mem_alloc create_files"
+  ITERATIONS: "3"
+  # Directory holding the OSBench binaries; empty means search PATH and the
+  # suite directory.
+  OSBENCH_DIR: ""
+  # Scratch directory for create_files. Keep this off tmpfs or the test
+  # measures the page cache instead of the filesystem.
+  WORK_DIR: ""
+  SET_PERF_GOV: "1"
+  TIMEOUT_SEC: "300"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/OSBench || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --tests "$TESTS"
+      --iterations "$ITERATIONS"
+      --osbench-dir "$OSBENCH_DIR"
+      --work-dir "$WORK_DIR"
+      --set-perf-gov "$SET_PERF_GOV"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh OSBench.res'

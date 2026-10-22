@@ -1,0 +1,102 @@
+metadata:
+  name: rt-cyclictest-glmark2
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Real-time wake-up latency with cyclictest while glmark2 drives the GPU.
+    This is the scenario that exposes latency caused by the graphics stack -
+    DRM/KMS work, GPU interrupts, the compositor's own threads and the memory
+    traffic the GPU generates - and it is read against rt-cyclictest-noload,
+    not on its own. Reuses the existing Kernel/RT-tests/Cyclictest runner and
+    publishes the latencies to LAVA as measurements in microseconds. Note that
+    glmark2 is the load here, not the thing being measured; its score is not
+    collected (use the graphics suites for that). SKIPs when no usable glmark2
+    or DRM device is present rather than running unloaded, because an idle run
+    reported under this name would read as an excellent result for a test that
+    never happened.
+  os:
+    - linux
+  scope:
+    - performance
+    - preempt-rt
+
+params:
+  OUT_DIR: "./logs_Cyclictest_Glmark2"
+  INTERVAL: "1000"
+  THREADS: "NPROC"
+  DURATION: "300s"
+  ITERATIONS: "1"
+  PRIO: "98"
+  BINARY: ""
+  PROGRESS_EVERY: "1"
+  HEARTBEAT_SEC: "10"
+  # Explicit glmark2 flavour, e.g. glmark2-es2-wayland or glmark2-es2-drm.
+  # Empty autodetects, preferring a Wayland flavour when a session exists.
+  GLMARK2_BIN: ""
+  # Extra glmark2 arguments, appended verbatim. --run-forever keeps the load
+  # up for the whole cyclictest run; without it glmark2 finishes its scene
+  # list early and the tail of the run would be measured idle.
+  GLMARK2_EXTRA: "--run-forever"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Kernel/RT-tests/Cyclictest || exit 0'
+    - 'NT="$THREADS"; [ "$NT" = "NPROC" ] && NT="$(nproc 2>/dev/null || echo 1)"'
+    # A GPU load needs a render node; without one glmark2 would either fail or
+    # fall back to software rendering, which is a CPU load wearing a GPU label.
+    - >
+      if ! ls /dev/dri/* >/dev/null 2>&1; then
+      echo "Cyclictest-Glmark2 SKIP" > Cyclictest-Glmark2.res;
+      echo "[SKIP] no /dev/dri device; cannot apply a GPU load";
+      $REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-Glmark2.res;
+      exit 0;
+      fi
+    # Adopt an existing Wayland session if there is one, so the Wayland
+    # flavour of glmark2 can reach a compositor.
+    - '. $REPO_PATH/Runner/utils/functestlib.sh 2>/dev/null || true'
+    - 'if [ -f $REPO_PATH/Runner/utils/lib_display.sh ]; then . $REPO_PATH/Runner/utils/lib_display.sh 2>/dev/null || true; fi'
+    - >
+      if [ -z "${WAYLAND_DISPLAY:-}" ] && command -v discover_wayland_socket_anywhere >/dev/null 2>&1; then
+      WS="$(discover_wayland_socket_anywhere 2>/dev/null || true)";
+      if [ -n "$WS" ]; then adopt_wayland_env_from_socket "$WS" 2>/dev/null || true; fi;
+      fi
+    # Pick a flavour that matches the session that actually exists, rather
+    # than assuming one: the wrong flavour fails to open a display and the
+    # load silently never starts.
+    - >
+      GB="$GLMARK2_BIN";
+      if [ -z "$GB" ]; then
+      if [ -n "${WAYLAND_DISPLAY:-}" ]; then CANDS="glmark2-es2-wayland glmark2-wayland";
+      elif [ -n "${DISPLAY:-}" ]; then CANDS="glmark2-es2 glmark2";
+      else CANDS="glmark2-es2-drm glmark2-drm"; fi;
+      for c in $CANDS; do
+      if command -v "$c" >/dev/null 2>&1; then GB="$c"; break; fi;
+      done;
+      fi
+    - >
+      if [ -z "$GB" ] || ! command -v "$GB" >/dev/null 2>&1; then
+      echo "Cyclictest-Glmark2 SKIP" > Cyclictest-Glmark2.res;
+      echo "[SKIP] no usable glmark2 flavour for this session; not running cyclictest unloaded under a loaded test name";
+      $REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-Glmark2.res;
+      exit 0;
+      fi
+    - 'echo "[INFO] GPU load: $GB $GLMARK2_EXTRA (WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset} DISPLAY=${DISPLAY:-unset})"'
+    # exec replaces the sh -c wrapper, so the PID the runner kills is glmark2
+    # itself - otherwise --run-forever would outlive the test and leave the
+    # GPU loaded for whatever runs next on this board.
+    - 'BG="exec $GB $GLMARK2_EXTRA"'
+    - >
+      ./run.sh
+      --out "$OUT_DIR"
+      --interval "$INTERVAL"
+      --threads "$NT"
+      --duration "$DURATION"
+      --iterations "$ITERATIONS"
+      --background-cmd "$BG"
+      --binary "$BINARY"
+      --progress-every "$PROGRESS_EVERY"
+      --heartbeat-sec "$HEARTBEAT_SEC"
+      || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/result.txt" || true'
+    - 'if [ -f CyclicTest.res ]; then sed "s/^CyclicTest /Cyclictest-Glmark2 /" CyclicTest.res > Cyclictest-Glmark2.res; fi'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Cyclictest-Glmark2.res'
