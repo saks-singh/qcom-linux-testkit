@@ -35,4 +35,9 @@ run:
     - REPO_PATH=$PWD
     - cd Runner/suites/Kernel/RT-tests/Hackbench
     - ./run.sh --out "${OUT_DIR}" --iterations "${ITERATIONS}" --target "${TARGET}" --datasize "${DATASIZE}" --loops "${LOOPS}" --grps "${GRPS}" --fds "${FDS}" --pipe "${PIPE}" --threads "${THREADS}" --background-cmd "${BACKGROUND_CMD}" --binary "${BINARY}" --progress-every "${PROGRESS_EVERY}" --heartbeat-sec "${HEARTBEAT_SEC}" $( [ "${VERBOSE}" = "1" ] && echo "--verbose" ) || true
+    # Publish the scheduler timings, not just the verdict. The runner already
+    # writes result.txt as "<id> pass <value> s" via
+    # rt_parse_token_numeric_samples, which is exactly this emitter's input
+    # format, so no parsing is needed here.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "${OUT_DIR}/result.txt" || true'
     - $REPO_PATH/Runner/utils/send-to-lava.sh Hackbench.res

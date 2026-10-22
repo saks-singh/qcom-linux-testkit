@@ -98,5 +98,13 @@ run:
       --standalone "$STANDALONE"
       || true
 
+    # Publish the storage figures, not just the verdict: the runner's metrics
+    # TSV carries throughput / IOPS / latency per mode and thread count, which
+    # the converter turns into the emitter's record format.
+    - >
+      $REPO_PATH/Runner/utils/metrics-from-tiotest-tsv.sh
+      "$OUT_DIR/tiotest_metrics.tsv" "$OUT_DIR/metrics.txt" || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+
     # Emit result to LAVA (expects Tiotest.res in current directory)
     - $REPO_PATH/Runner/utils/send-to-lava.sh Tiotest.res

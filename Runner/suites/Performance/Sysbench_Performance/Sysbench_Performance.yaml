@@ -42,8 +42,10 @@ params:
   BASELINE_FILE: ""
   ALLOWED_DEVIATION: "0.10"
 
-  # Optional CSV append
-  CSV_FILE: ""
+  # Optional CSV append. Defaulted to a path under OUT_DIR because the CSV is
+  # what carries the scores out to LAVA: run.sh only writes it when --csv is
+  # given, and with it empty the job reports a bare pass/fail and no numbers.
+  CSV_FILE: "./logs_Sysbench_Performance/sysbench_metrics.csv"
 
   VERBOSE: "0"
 
@@ -64,36 +66,49 @@ run:
     - REPO_PATH=$PWD
     - cd Runner/suites/Performance/Sysbench_Performance/
 
-    # Explicitly forward params to run.sh (best practice)
+    # Explicitly forward params to run.sh (best practice).
+    #
+    # These flag names must match run.sh's option parser exactly. They
+    # previously used the uppercase param names (--OUT_DIR, --ITERATIONS, ...)
+    # which run.sh does not accept: its parser has only the lowercase forms,
+    # and its catch-all arm does "exit 2". The very first flag therefore
+    # aborted the script before a single benchmark ran - and because it exited
+    # 2 without writing Sysbench_Performance.res, the failure surfaced as a
+    # missing result rather than as a visible error.
     - >
       ./run.sh
-      --OUT_DIR "$OUT_DIR"
-      --ITERATIONS "$ITERATIONS"
-      --TIME "$TIME"
-      --RAND_SEED "$RAND_SEED"
-      --THREADS_LIST "$THREADS_LIST"
-      --CPU_MAX_PRIME "$CPU_MAX_PRIME"
-      --THREAD_LOCKS "$THREAD_LOCKS"
-      --THREAD_YIELDS "$THREAD_YIELDS"
-      --MEMORY_OPER "$MEMORY_OPER"
-      --MEMORY_ACCESS_MODE "$MEMORY_ACCESS_MODE"
-      --MEMORY_BLOCK_SIZE "$MEMORY_BLOCK_SIZE"
-      --MEMORY_TOTAL_SIZE "$MEMORY_TOTAL_SIZE"
-      --MUTEX_NUM "$MUTEX_NUM"
-      --MUTEX_LOCKS "$MUTEX_LOCKS"
-      --MUTEX_LOOPS "$MUTEX_LOOPS"
-      --TASKSET_CPU_LIST "$TASKSET_CPU_LIST"
-      --BASELINE_FILE "$BASELINE_FILE"
-      --ALLOWED_DEVIATION "$ALLOWED_DEVIATION"
-      --CSV_FILE "$CSV_FILE"
-      --VERBOSE "$VERBOSE"
-      --FILEIO_DIR "$FILEIO_DIR"
-      --FILEIO_TOTAL_SIZE "$FILEIO_TOTAL_SIZE"
-      --FILEIO_NUM "$FILEIO_NUM"
-      --FILEIO_BLOCK_SIZE "$FILEIO_BLOCK_SIZE"
-      --FILEIO_IO_MODE "$FILEIO_IO_MODE"
-      --FILEIO_FSYNC_FREQ "$FILEIO_FSYNC_FREQ"
-      --FILEIO_EXTRA_FLAGS "$FILEIO_EXTRA_FLAGS"
+      --out-dir "$OUT_DIR"
+      --iterations "$ITERATIONS"
+      --time "$TIME"
+      --seed "$RAND_SEED"
+      --threads-list "$THREADS_LIST"
+      --cpu-max-prime "$CPU_MAX_PRIME"
+      --thread-locks "$THREAD_LOCKS"
+      --thread-yields "$THREAD_YIELDS"
+      --mem-oper "$MEMORY_OPER"
+      --mem-access-mode "$MEMORY_ACCESS_MODE"
+      --mem-block-size "$MEMORY_BLOCK_SIZE"
+      --mem-total-size "$MEMORY_TOTAL_SIZE"
+      --mutex-num "$MUTEX_NUM"
+      --mutex-locks "$MUTEX_LOCKS"
+      --mutex-loops "$MUTEX_LOOPS"
+      --taskset-cpu-list "$TASKSET_CPU_LIST"
+      --baseline "$BASELINE_FILE"
+      --delta "$ALLOWED_DEVIATION"
+      --csv "$CSV_FILE"
+      --verbose "$VERBOSE"
+      --fileio-dir "$FILEIO_DIR"
+      --fileio-total-size "$FILEIO_TOTAL_SIZE"
+      --fileio-num "$FILEIO_NUM"
+      --fileio-block-size "$FILEIO_BLOCK_SIZE"
+      --fileio-io-mode "$FILEIO_IO_MODE"
+      --fileio-fsync-freq "$FILEIO_FSYNC_FREQ"
+      --fileio-extra-flags "$FILEIO_EXTRA_FLAGS"
       || true
 
+    # Publish the scores, not just the verdict.
+    - >
+      $REPO_PATH/Runner/utils/metrics-from-sysbench-csv.sh
+      "$CSV_FILE" "$OUT_DIR/metrics.txt" || true
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
     - $REPO_PATH/Runner/utils/send-to-lava.sh Sysbench_Performance.res
