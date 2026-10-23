@@ -33,7 +33,11 @@ params:
 
   # Sequential parameters
   SEQ_BLOCK_SIZE: "524288"     # 512 KB
-  SEQ_FILE_SIZE_MB: "2048"     # 2 GB per thread
+  # 1 GB per thread, so 4 GB in flight at THREADS_LIST=4. Raising this does not
+  # make the figures more honest: O_SYNC below is what takes the write path off
+  # the page cache, and the read path stays buffered at any size that fits in
+  # the rootfs (see SYNC_WRITES). A larger working set would only risk ENOSPC.
+  SEQ_FILE_SIZE_MB: "1024"
 
   # Random parameters
   RND_BLOCK_SIZE: "4096"       # 4 KB
