@@ -66,6 +66,14 @@ RUN_BW="${RUN_BW:-1}"
 RUN_LAT="${RUN_LAT:-1}"
 LAT_SIZE="${LAT_SIZE:-256M}"
 LAT_STRIDE="${LAT_STRIDE:-128}"
+# Run a second, randomised latency sweep (lat_mem_rd -t). A fixed stride is
+# perfectly predictable to the hardware prefetcher, so the strided sweep above
+# reports prefetched streaming latency - the first lab run produced 7.3 ns for
+# "main memory", which is a cache-line-ahead prefetch, not a DRAM access. The
+# randomised pointer chase defeats the prefetcher and is the figure to quote
+# as unloaded memory latency. Both are published, under separate case ids, so
+# the strided series stays comparable with earlier runs.
+LAT_RANDOM="${LAT_RANDOM:-1}"
 L1_SIZE="${L1_SIZE:-0.00098}"
 L2_SIZE="${L2_SIZE:-0.125}"
 ITERATIONS="${ITERATIONS:-3}"
@@ -89,6 +97,9 @@ Usage: $0 [OPTIONS]
   --run-lat 0|1          run the latency test (default: $RUN_LAT)
   --lat-size SIZE        lat_mem_rd working set (default: $LAT_SIZE)
   --lat-stride N         lat_mem_rd stride (default: $LAT_STRIDE)
+  --lat-random 0|1       also run a randomised sweep (lat_mem_rd -t), which is
+                         the one that measures real DRAM latency rather than
+                         prefetched streaming latency (default: $LAT_RANDOM)
   --l1-size MB           array size reported as L1, in MB (default: $L1_SIZE)
   --l2-size MB           array size reported as L2, in MB (default: $L2_SIZE)
   --iterations N         repeats per measurement (default: $ITERATIONS)
@@ -114,6 +125,7 @@ while [ "$#" -gt 0 ]; do
     --run-lat) RUN_LAT="$2"; shift 2 ;;
     --lat-size) LAT_SIZE="$2"; shift 2 ;;
     --lat-stride) LAT_STRIDE="$2"; shift 2 ;;
+    --lat-random) LAT_RANDOM="$2"; shift 2 ;;
     --l1-size) L1_SIZE="$2"; shift 2 ;;
     --l2-size) L2_SIZE="$2"; shift 2 ;;
     --iterations) ITERATIONS="$2"; shift 2 ;;
@@ -290,6 +302,44 @@ if [ -n "$LAT_BIN" ]; then
     log_fail "$TESTNAME: lat_mem_rd produced no output"
     bench_metric "ddr-latency-main-memory-read" "fail"
   fi
+
+  # ------------------------------------------------- randomised latency sweep
+  #
+  # lat_mem_rd -t walks a random permutation instead of a constant stride, so
+  # each load depends on the previous one and the prefetcher cannot run ahead.
+  # This is the measurement that answers "what does a DRAM access cost"; the
+  # strided sweep above answers "what does a streamed read cost", which is a
+  # different and much smaller number. Reported under its own case ids rather
+  # than replacing the strided ones, so neither series is reinterpreted.
+  if [ "$LAT_RANDOM" = "1" ]; then
+    rlatlog="$OUT_DIR/lat_mem_rd_random.log"
+
+    log_info "$TESTNAME: lat_mem_rd -t (random) $LAT_SIZE_ARG stride $LAT_STRIDE"
+    bench_run_logged "$rlatlog" "$LAT_BIN" -t "$LAT_SIZE_ARG" "$LAT_STRIDE" || true
+
+    if [ -s "$rlatlog" ]; then
+      rmain_lat="$(
+        awk '
+          NF == 2 && $1 ~ /^[0-9]+([.][0-9]+)?$/ && $2 ~ /^[0-9]+([.][0-9]+)?$/ {
+            last = $2
+          }
+          END { if (last != "") print last }
+        ' "$rlatlog" 2>/dev/null || true
+      )"
+
+      if [ -n "$rmain_lat" ]; then
+        bench_metric "ddr-latency-main-memory-read-random" "pass" "$rmain_lat" "ns"
+      else
+        # Not every lmbench build accepts -t; say so rather than failing the
+        # suite over a measurement the binary cannot make.
+        log_warn "$TESTNAME: no randomised latency parsed (does this lat_mem_rd support -t?)"
+        bench_metric "ddr-latency-main-memory-read-random" "skip"
+      fi
+    else
+      log_warn "$TESTNAME: randomised lat_mem_rd produced no output (-t unsupported?)"
+      bench_metric "ddr-latency-main-memory-read-random" "skip"
+    fi
+  fi
 else
   log_info "$TESTNAME: latency test not run"
 fi
@@ -313,6 +363,11 @@ summary="$OUT_DIR/summary.txt"
   done
   echo "# latency (ns)"
   echo "  see $OUT_DIR/lat_mem_rd.log"
+  if [ "$LAT_RANDOM" = "1" ]; then
+    echo "  randomised sweep: $OUT_DIR/lat_mem_rd_random.log"
+    echo "  # quote the randomised figure as DRAM latency; the strided one is"
+    echo "  # prefetched streaming latency and is several times smaller"
+  fi
 } > "$summary"
 
 log_info "$TESTNAME: summary written to $summary"

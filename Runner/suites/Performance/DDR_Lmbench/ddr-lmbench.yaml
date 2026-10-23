@@ -25,6 +25,14 @@ params:
   # lat_mem_rd sweeps array sizes up to this value using the given stride.
   LAT_SIZE: "256M"
   LAT_STRIDE: "128"
+
+  # Also run lat_mem_rd -t, a randomised pointer chase. A fixed stride is
+  # fully predictable to the prefetcher, so the strided sweep measures
+  # prefetched streaming latency (7.3 ns on QCS9075) rather than a DRAM
+  # access. The randomised figure is the one to quote as memory latency; it
+  # is published as ddr-latency-main-memory-read-random, alongside the strided
+  # series rather than in place of it.
+  LAT_RANDOM: "1"
   # Array sizes (in MB, as lat_mem_rd prints them) to report as L1 and L2.
   L1_SIZE: "0.00098"
   L2_SIZE: "0.125"
@@ -54,6 +62,7 @@ run:
       --run-lat "$RUN_LAT"
       --lat-size "$LAT_SIZE"
       --lat-stride "$LAT_STRIDE"
+      --lat-random "$LAT_RANDOM"
       --l1-size "$L1_SIZE"
       --l2-size "$L2_SIZE"
       --iterations "$ITERATIONS"

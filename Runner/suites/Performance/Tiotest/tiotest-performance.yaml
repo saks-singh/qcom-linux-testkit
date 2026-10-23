@@ -33,7 +33,7 @@ params:
 
   # Sequential parameters
   SEQ_BLOCK_SIZE: "524288"     # 512 KB
-  SEQ_FILE_SIZE_MB: "1024"     # 1 GB per thread
+  SEQ_FILE_SIZE_MB: "2048"     # 2 GB per thread
 
   # Random parameters
   RND_BLOCK_SIZE: "4096"       # 4 KB
@@ -45,7 +45,15 @@ params:
   HIDE_LATENCY: "0"            # --hide-latency (0 => show latency, 1 => hide latency)
   TERSE: "0"                   # --terse
   SEQ_WRITE_PHASE: "0"         # --seq-write-phase
-  SYNC_WRITES: "0"             # --sync-writes
+  # 1 => O_SYNC. Without it tiotest measures the page cache, not the device:
+  # the first lab run reported 11.3 GB/s sequential write and 14.8 GB/s read
+  # on a box with 34.7 GB of RAM, an order of magnitude above UFS media speed.
+  # O_SYNC puts the write figures back on the storage device.
+  #
+  # The READ figures stay buffered regardless: defeating the read cache needs a
+  # working set larger than RAM (~9 GB per thread at 4 threads), which will not
+  # fit in the rootfs. Treat tiotest reads as a buffered-I/O path measurement.
+  SYNC_WRITES: "1"             # --sync-writes
   CONSISTENCY: "0"             # --consistency
   DEBUG_LEVEL: ""              # --debug-level
 

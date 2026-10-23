@@ -16,8 +16,12 @@
 #   absent is reported as skip, and the rest still run; the suite only SKIPs
 #   outright when none of the requested binaries exist.
 # - OSBench prints a human-readable summary rather than a machine format, so
-#   the parser is deliberately tolerant: it takes the number following
-#   "average" on any line and normalises by whichever time unit follows it.
+#   the parser is deliberately tolerant: it takes the per-operation figure from
+#   the "<value> <unit> / <noun>" line that OSBench 1.0.2 actually emits (e.g.
+#   "23.131371 us / thread"), falling back to a labelled "average ..." line for
+#   other builds, and normalises by whichever time unit was used.
+# - create_files takes its target directory as a required argument, unlike the
+#   other binaries, which take none.
 
 SCRIPT_DIR="$(
   cd "$(dirname "$0")" || exit 1
@@ -116,34 +120,63 @@ fi
 # osbench_extract_avg_us <logfile>
 #
 # Prints the average cost per operation in microseconds, or nothing.
-# Accepts any line containing "average" followed by a number and a time unit,
-# which covers OSBench's "Average time: 12.34 us" as well as the variants
-# that spell it "average: 12.34us per thread".
+#
+# OSBench 1.0.2 reports the per-operation cost as a bare value-unit-noun line
+# directly after the "Benchmark: ..." header, with no label at all:
+#
+#   Benchmark: Create/teardown of 100 threads...
+#   23.131371 us / thread
+#   34.124136 ns / alloc
+#
+# so a parser keyed on the word "average" finds nothing and discards perfectly
+# good data - which is exactly what happened on the first lab run. Match the
+# real format first, and keep the labelled forms ("Average time: 12.34 us",
+# "average: 12.34us per thread") as a fallback for other builds.
+#
+# The unit is whatever the binary chose - us for thread/file work, ns for
+# allocation - so every value is normalised to microseconds, otherwise two
+# sub-benchmarks under the same suite would be reported on different scales.
 osbench_extract_avg_us() {
     awk '
+        function to_us(val, unit) {
+            if (unit ~ /^ns/)                            { return val / 1000 }
+            else if (unit ~ /^(us|micro)/)               { return val }
+            else if (unit ~ /^ms/)                       { return val * 1000 }
+            else if (unit ~ /^s/)                        { return val * 1000000 }
+            # No recognisable unit: the tool already reported microseconds.
+            return val
+        }
+
         BEGIN { IGNORECASE = 1 }
+
+        # Preferred: "<number> <unit> / <noun>" or "<number> <unit> per <noun>".
+        # Anchored on the unit followed by a per-operation marker so a stray
+        # number in the header text cannot be mistaken for a result.
+        {
+            line = tolower($0)
+            if (match(line, /[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?[ \t]*(ns|us|microseconds?|ms|s)[ \t]*(\/|per )/)) {
+                tok = substr(line, RSTART, RLENGTH)
+                match(tok, /^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?/)
+                val = substr(tok, 1, RLENGTH) + 0
+                unit = substr(tok, RLENGTH + 1)
+                sub(/^[ \t]+/, "", unit)
+                printf "%.6f\n", to_us(val, unit)
+                exit 0
+            }
+        }
+
+        # Fallback: the first number after the word "average".
         /average/ {
             line = tolower($0)
-            # Find the first number after the word "average".
             idx = index(line, "average")
             rest = substr(line, idx)
-            # Strip everything up to the first digit.
             if (match(rest, /[0-9]/) == 0) { next }
             rest = substr(rest, RSTART)
             if (match(rest, /^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?/) == 0) { next }
             val = substr(rest, 1, RLENGTH) + 0
             unit = substr(rest, RLENGTH + 1)
             sub(/^[ \t]+/, "", unit)
-
-            # Normalise to microseconds.
-            if (unit ~ /^ns/)                 { val = val / 1000 }
-            else if (unit ~ /^us/ ||
-                     unit ~ /^microsec/)      { val = val }
-            else if (unit ~ /^ms/)            { val = val * 1000 }
-            else if (unit ~ /^s/)             { val = val * 1000000 }
-            # No recognisable unit: assume the tool already reported us.
-
-            printf "%.6f\n", val
+            printf "%.6f\n", to_us(val, unit)
             exit 0
         }
     ' "$1" 2>/dev/null
@@ -194,10 +227,20 @@ for t in $TESTS; do
   while [ "$i" -le "$ITERATIONS" ] 2>/dev/null; do
     runlog="$OUT_DIR/${t}_run${i}.log"
 
-    # create_files needs somewhere to write; the others ignore extra args, so
-    # the working directory is set rather than passed as an argument.
+    # create_files takes its target directory as a required ARGUMENT:
+    #
+    #   Usage: /bin/create_files root-folder
+    #
+    # The first lab run passed none (it changed directory instead, on the
+    # mistaken assumption that the binary used the cwd) and every iteration
+    # exited rc=1 with that usage line. Pass the directory; the other
+    # binaries take no arguments at all.
     if [ "$t" = "create_files" ]; then
-      ( cd "$WORK_DIR" 2>/dev/null || exit 1; exec "$tbin" ) > "$runlog" 2>&1
+      # Start each iteration from an empty directory: the files the previous
+      # iteration left behind would otherwise be part of what is measured.
+      rm -rf "$WORK_DIR" 2>/dev/null || true
+      mkdir -p "$WORK_DIR" 2>/dev/null || true
+      bench_run_logged "$runlog" "$tbin" "$WORK_DIR"
       rc=$?
     else
       bench_run_logged "$runlog" "$tbin"

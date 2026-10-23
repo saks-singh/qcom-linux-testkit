@@ -1,0 +1,68 @@
+metadata:
+  name: hackbench-performance
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Hackbench scheduler / IPC benchmark. Groups of tasks pass messages over
+    sockets or pipes and the figure of merit is the wall time to complete the
+    exchange; the per-iteration times are published to LAVA as measurements.
+    This is the performance counterpart to Kernel/RT-tests/Hackbench, which
+    resolves the binary with a plain PATH lookup and therefore SKIPs on an
+    image where the workload exists but /usr/bin/hackbench does not. This
+    suite also searches rt-tests' install locations and, failing that, uses
+    "perf bench sched messaging" - which is hackbench imported into perf, so
+    the workload is the same even though the binary is not.
+  os:
+    - linux
+  scope:
+    - performance
+    - scheduler
+
+params:
+  OUT_DIR: "./logs_Hackbench_Performance"
+
+  ITERATIONS: "10"
+  GRPS: "10"
+  LOOPS: "100"
+  FDS: "20"
+  DATASIZE: "100"
+
+  # 0 => sockets, 1 => pipes. 0 => processes, 1 => threads.
+  PIPE: "0"
+  THREADS: "0"
+
+  BINARY: ""
+  HACKBENCH_DIR: ""
+
+  # Use "perf bench sched messaging" when no hackbench binary is present.
+  # The case ids carry the engine, so a perf-driven run is never silently
+  # mixed into a hackbench series.
+  ALLOW_PERF_BENCH: "1"
+
+  SET_PERF_GOV: "1"
+  TIMEOUT_SEC: "900"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Hackbench_Performance || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --iterations "$ITERATIONS"
+      --grps "$GRPS"
+      --loops "$LOOPS"
+      --fds "$FDS"
+      --datasize "$DATASIZE"
+      --pipe "$PIPE"
+      --threads "$THREADS"
+      --binary "$BINARY"
+      --hackbench-dir "$HACKBENCH_DIR"
+      --allow-perf-bench "$ALLOW_PERF_BENCH"
+      --set-perf-gov "$SET_PERF_GOV"
+      --timeout-sec "$TIMEOUT_SEC"
+      || true
+    # No expected: list in the job definition for this suite - the case id
+    # prefix depends on which engine was resolved, and LAVA treats expected:
+    # as a whitelist that would force the other engine's cases to fail.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Hackbench_Performance.res'

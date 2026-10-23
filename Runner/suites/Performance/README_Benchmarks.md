@@ -21,6 +21,8 @@ LAVA sees the test's own verdict rather than a shell exit code. Gate on the
 | DDR latency + bandwidth | `DDR_Lmbench/` | lmbench `lat_mem_rd` and `bw_mem` (rd/frd/wr/fwr/bzero/cp/bcopy) |
 | DDR speed | `DDR_RAMspeed/` | RAMspeed/RAMsmp copy/scale/add/triad and per-block-size rates |
 | Scheduler (threads) | `Threadbench/` | Thread create/switch throughput across thread counts |
+| Scheduler (IPC) | `Hackbench_Performance/` | hackbench message-passing time; falls back to `perf bench sched messaging` |
+| Graphics (OpenGL ES) | `Glmark2/` | glmark2 overall score and per-scene fps |
 | Graphics (Vulkan) | `Vkmark/` | vkmark overall score and per-scene fps |
 | GPU + CPU | `QMLBench/` | qmlbench per-benchmark averages and total score |
 | Sockets | `Sockperf/` | Latency, percentiles, message rate, bandwidth |
@@ -30,13 +32,21 @@ LAVA sees the test's own verdict rather than a shell exit code. Gate on the
 Already present elsewhere in the repo and **not** duplicated here:
 
 - **Storage (TIO)** - `Performance/Tiotest/`
-- **Hackbench** - `Kernel/RT-tests/Hackbench/`
 - **Cyclictest runner** - `Kernel/RT-tests/Cyclictest/`; the scenarios in
   `Cyclictest_Scenarios/` are job definitions that drive it, not a second
   implementation
-- **glmark2** - `Multimedia/Graphics/X11_Glmark2/` *validates* rendering but
-  publishes no measurement, so glmark2 **scores** are not yet in LAVA. A
-  `Performance` counterpart would be needed for that; see "Known gaps".
+
+Deliberately duplicated, because the existing suite answers a different
+question:
+
+- **Hackbench** - `Kernel/RT-tests/Hackbench/` resolves the binary with a
+  plain `PATH` lookup, so it SKIPs on an image that has the workload but not
+  `/usr/bin/hackbench`. `Hackbench_Performance/` also searches rt-tests'
+  install locations and can fall back to `perf bench sched messaging`.
+- **glmark2** - `Multimedia/Graphics/X11_Glmark2/` *validates* rendering
+  inside a real XFCE session and publishes a verdict only, SKIPping on an
+  image with no desktop. `Glmark2/` takes whichever window system the board
+  has and is after the score.
 
 ## Publishing measurements: `send-metrics-to-lava.sh`
 
@@ -181,12 +191,42 @@ measurements. A run with 2% timeouts is not the same number as a clean one,
 and folding that into a single pass/fail hides it from whoever reads the
 trend.
 
+## What a measurement does and does not say
+
+Two figures from the first lab run (job 503943) were real but did not mean
+what their names suggested. Both are now configured so they do, and both are
+worth understanding before quoting any number from this set.
+
+- **Tiotest throughput was page cache, not storage.** Buffered writes on a
+  34.7 GB-RAM board reported 11.3 GB/s, an order of magnitude above UFS media
+  speed. `SYNC_WRITES: "1"` (O_SYNC) is now the default, which puts the write
+  figures back on the device. **Reads remain buffered**: defeating the read
+  cache needs a working set larger than RAM, which does not fit in the rootfs,
+  so tiotest reads characterise the buffered-I/O path and not the media.
+- **A strided `lat_mem_rd` is not DRAM latency.** A constant 128-byte stride
+  is perfectly predictable to the hardware prefetcher, which is why the
+  strided sweep reported 7.3 ns for "main memory" - a prefetch, not a DRAM
+  access. `LAT_RANDOM: "1"` adds a randomised pointer chase
+  (`lat_mem_rd -t`), published as
+  `ddr-latency-main-memory-read-random`. Quote that one as memory latency; the
+  strided series is kept, under its original case ids, as a streaming figure.
+
+The general rule: a benchmark that runs clean still has to be read in the
+context of what the system let it measure.
+
 ## Known gaps
 
-- **glmark2 scores** are not published - see the table above.
 - **Browser benchmarks** (MotionMark, Speedometer, JetStream, Wirple,
   WebXPRT) are out of scope for this set.
 - **ShellCheck** could not be run in the environment these suites were
   written in, although `CONTRIBUTING.md` requires it. The repo's POSIX
   idioms were held manually and every script passes `sh -n`; please run
   ShellCheck before merging.
+- **Tiotest read figures** cannot be taken off the page cache on a board with
+  this much RAM - see the section above.
+- **CoreMark-PRO, rt-tests and RAMspeed** are not in the lab's
+  `qcom-multimedia-image`, so those suites SKIP there. That is deliberate:
+  `bench_resolve_bin` never downloads or builds, because a self-built binary
+  with unknown compiler flags produces a score that cannot be compared with
+  anything. Stage them into the image, or point the suite at them with
+  `--dir` / `--binary`.
