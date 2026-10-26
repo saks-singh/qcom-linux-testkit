@@ -1,0 +1,53 @@
+metadata:
+  name: memory-info
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Reads /proc/meminfo and publishes MemTotal, MemFree, Cached, the kernel's
+    MemAvailable estimate and the derived MemTotal - (MemFree + Cached) figure
+    to LAVA as measurements, in kB. The whole file is archived so any other
+    counter can be re-derived without another run. Nothing is allocated or
+    freed; this is a read of kernel counters. Run it early in a job: once a
+    benchmark has done I/O, Cached describes that benchmark rather than the
+    booted system.
+  os:
+    - linux
+  scope:
+    - performance
+    - memory
+
+params:
+  OUT_DIR: "./logs_Memory_Info"
+
+  MEMINFO: "/proc/meminfo"
+
+  # One sample by default. With more than one, the point values keep their case
+  # ids and mean/min/max are published alongside, so the id set does not change
+  # shape with the sample count.
+  ITERATIONS: "1"
+  INTERVAL_SECS: "1"
+
+  # Delay before the first sample. Worth raising when this runs immediately
+  # after boot, while services are still settling and the counters are moving.
+  SETTLE_SECS: "0"
+
+  # Additional /proc/meminfo fields to publish, spelled exactly as in the file.
+  EXTRA_FIELDS: ""
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Memory_Info || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --meminfo "$MEMINFO"
+      --iterations "$ITERATIONS"
+      --interval-secs "$INTERVAL_SECS"
+      --settle-secs "$SETTLE_SECS"
+      --extra-fields "$EXTRA_FIELDS"
+      || true
+    # No expected: list in the job definition for this suite - EXTRA_FIELDS and
+    # ITERATIONS both change which case ids appear, and LAVA treats expected:
+    # as a whitelist that would force every unlisted case to fail.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Memory_Info.res'

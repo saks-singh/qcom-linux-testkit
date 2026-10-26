@@ -1,0 +1,57 @@
+metadata:
+  name: boot-time-markers
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Boot time markers. Publishes boot-phase timestamps and durations to LAVA as
+    measurements, from systemd-analyze (time, blame, critical-chain), the
+    systemd manager's own monotonic timestamp properties, per-unit properties,
+    and the kernel log. Covers the firmware/bootloader/kernel/userspace split,
+    the in-kernel breakdown (rootfs mount, handover to the init process),
+    systemd unit-file load start and finish, the udev services, and
+    sysinit.target. Measures the boot that already happened; nothing here
+    reboots the target. Markers the platform does not have are reported SKIP
+    rather than zero, so an absent UEFI firmware time is not mistaken for an
+    instant one.
+  os:
+    - linux
+  scope:
+    - performance
+    - boot
+
+params:
+  OUT_DIR: "./logs_Boot_Time_Markers"
+
+  # Headline target. Yocto images are often multi-user.target only; when this
+  # target was not reached the suite says so and also publishes the actual
+  # default target's time under boot-default-target-reached-after.
+  TARGET: "graphical.target"
+
+  # systemd-analyze answers "Bootup is not yet finished" until the initial
+  # transaction drains, and every phase would then read as absent. Poll for
+  # this long before giving up.
+  WAIT_FINISH_SEC: "120"
+
+  UNITS: "systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target multi-user.target graphical.target"
+
+  BLAME_TOP: "10"
+  COLLECT_JOURNAL: "1"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Boot_Time_Markers || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --target "$TARGET"
+      --wait-finish-sec "$WAIT_FINISH_SEC"
+      --units "$UNITS"
+      --blame-top "$BLAME_TOP"
+      --collect-journal "$COLLECT_JOURNAL"
+      || true
+    # No expected: list in the job definition for this suite - the case ids
+    # depend on which units exist on the image and on which units turn up in
+    # systemd-analyze blame, and LAVA treats expected: as a whitelist that
+    # would force every unlisted case to fail.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Boot_Time_Markers.res'

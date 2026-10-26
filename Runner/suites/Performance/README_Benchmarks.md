@@ -28,6 +28,8 @@ LAVA sees the test's own verdict rather than a shell exit code. Gate on the
 | Sockets | `Sockperf/` | Latency, percentiles, message rate, bandwidth |
 | HTTP load | `Wrk_HTTP/` | wrk/wrk2 requests/sec, transfer/sec, latency distribution |
 | Real-time latency | `Cyclictest_Scenarios/` | cyclictest wake-up latency, three load scenarios |
+| Boot time | `Boot_Time_Markers/` | firmware/loader/kernel/userspace phases, in-kernel breakdown, unit-file load, udev, `sysinit.target` - timestamps and durations |
+| System memory | `Memory_Info/` | `/proc/meminfo` totals: MemTotal, MemFree, Cached, MemAvailable, and MemTotal - (MemFree + Cached) |
 
 Already present elsewhere in the repo and **not** duplicated here:
 
@@ -47,6 +49,16 @@ question:
   inside a real XFCE session and publishes a verdict only, SKIPping on an
   image with no desktop. `Glmark2/` takes whichever window system the board
   has and is after the score.
+- **Boot time** - `Boot_Systemd_Validate/` collects the same artifacts and
+  gates them against `boot_kpi_goals`, but emits a single verdict, so no
+  individual marker reaches LAVA as a number. `Boot_Time_Markers/` publishes
+  each marker as its own measurement and does no gating, so a regression shows
+  up as a moving number instead of a threshold that one day trips.
+  `Boot_Systemd_KPI_Loop/` is the repeated-reboot statistic; neither new suite
+  reboots the target.
+- **Memory** - `Memory_Map/` walks per-process `smaps` for PSS attribution
+  ("which process holds the memory"). `Memory_Info/` reads the system-wide
+  `/proc/meminfo` counters, which is the figure to trend per build.
 
 ## Publishing measurements: `send-metrics-to-lava.sh`
 
