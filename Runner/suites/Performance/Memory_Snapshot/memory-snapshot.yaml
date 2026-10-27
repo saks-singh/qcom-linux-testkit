@@ -1,0 +1,69 @@
+metadata:
+  name: memory-snapshot
+  format: "Lava-Test Test Definition 1.0"
+  description: >
+    Collects the device identity and the kernel's memory accounting sources on
+    the DUT, publishes the counters worth trending to LAVA as measurements, and
+    writes snapshot.json conforming to the qcom-perf-skills memory-analysis
+    contract (MemorySnapshot schema_version 1.0.0) so a baseline captured by
+    one job can be compared against a later one off the board. This is the
+    deterministic, device-side half of that skill: every source is a read of a
+    /proc, /sys or debugfs file - nothing is allocated, freed, started or
+    stopped. A missing source is a SKIP and "available": false, never a zero.
+    Run it early, and run it twice with different LABELs to bracket a workload.
+  os:
+    - linux
+  scope:
+    - performance
+    - memory
+    - device-info
+
+params:
+  OUT_DIR: "./logs_Memory_Snapshot"
+
+  # Recorded as "label" in snapshot.json. The skill's comparison stage uses it
+  # to say which snapshot is which; baseline / after_test is its convention.
+  LABEL: "baseline"
+
+  # Per-process PSS from /proc/<pid>/smaps_rollup. Cheap, but it is a few
+  # hundred reads, so it can be turned off on a time-boxed job.
+  COLLECT_PSS: "1"
+  PSS_TOP: "10"
+
+  # dma-buf, CMA and KGSL under debugfs. Needs debugfs mounted; absent is a
+  # SKIP, not a failure.
+  COLLECT_DEBUGFS: "1"
+
+  # Archive the kernel ring buffer beside the counters. No measurement comes
+  # off it; it is there so a carveout or OOM message can be read afterwards.
+  COLLECT_DMESG: "1"
+
+  # Additional /proc/meminfo fields to publish, spelled exactly as in the file.
+  EXTRA_MEMINFO_FIELDS: ""
+
+  # Delay before collecting. Worth raising when this runs straight after boot,
+  # while services are still settling and the counters are still moving.
+  SETTLE_SECS: "0"
+
+run:
+  steps:
+    - 'REPO_PATH="$PWD"'
+    - 'cd Runner/suites/Performance/Memory_Snapshot || exit 0'
+    - >
+      ./run.sh
+      --out-dir "$OUT_DIR"
+      --label "$LABEL"
+      --collect-pss "$COLLECT_PSS"
+      --pss-top "$PSS_TOP"
+      --collect-debugfs "$COLLECT_DEBUGFS"
+      --collect-dmesg "$COLLECT_DMESG"
+      --extra-meminfo-fields "$EXTRA_MEMINFO_FIELDS"
+      --settle-secs "$SETTLE_SECS"
+      || true
+    # No expected: list in the job definition for this suite. Most of the case
+    # ids are derived at runtime - one per CMA region the kernel declares, one
+    # per process in the PSS top N, one per EXTRA_MEMINFO_FIELDS entry - and
+    # LAVA treats expected: as a whitelist that forces every unlisted case to
+    # fail.
+    - '$REPO_PATH/Runner/utils/send-metrics-to-lava.sh "$OUT_DIR/metrics.txt" || true'
+    - '$REPO_PATH/Runner/utils/send-to-lava.sh Memory_Snapshot.res'

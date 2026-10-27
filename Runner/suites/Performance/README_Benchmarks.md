@@ -30,6 +30,7 @@ LAVA sees the test's own verdict rather than a shell exit code. Gate on the
 | Real-time latency | `Cyclictest_Scenarios/` | cyclictest wake-up latency, three load scenarios |
 | Boot time | `Boot_Time_Markers/` | firmware/loader/kernel/userspace phases, in-kernel breakdown, unit-file load, udev, `sysinit.target` - timestamps and durations |
 | System memory | `Memory_Info/` | `/proc/meminfo` totals: MemTotal, MemFree, Cached, MemAvailable, and MemTotal - (MemFree + Cached) |
+| Memory snapshot | `Memory_Snapshot/` | Device identity plus the whole memory accounting source set - meminfo, slabinfo, vmstat, memblock, dma-buf, CMA, KGSL, zram, per-process PSS - published as measurements and written as a `snapshot.json` another tool can consume |
 
 Already present elsewhere in the repo and **not** duplicated here:
 
@@ -59,6 +60,31 @@ question:
 - **Memory** - `Memory_Map/` walks per-process `smaps` for PSS attribution
   ("which process holds the memory"). `Memory_Info/` reads the system-wide
   `/proc/meminfo` counters, which is the figure to trend per build.
+  `Memory_Snapshot/` captures the whole source set at one instant - meminfo,
+  slabinfo, vmstat, memblock, dma-buf, CMA, KGSL, zram and PSS - and writes it
+  as a schema'd `snapshot.json` as well as measurements. It overlaps both on
+  purpose: it exists to be one self-consistent capture that can be compared
+  against another build's capture off the board, not to be the minimum set of
+  numbers.
+
+## Reusing a Claude skill's deterministic half
+
+`Memory_Snapshot/` is the device-side, deterministic part of the
+[`qcom-perf-skills`](https://github.com/qualcomm-linux/qcom-perf-skills)
+`memory-analysis` skill, reimplemented as a testkit suite. That skill is a
+host-side orchestrator that talks to a device over ADB or SSH and then produces
+an HTML report - neither of which fits a LAVA job. But its **collection stage
+issues nothing but `cat`, `ls`, `uname`, `dmesg`, `journalctl` and `getprop`**,
+so that stage ports to POSIX shell on the DUT with no host, no adbd and no DUT
+networking, and its output schema
+(`memory-skills/common/schema/memory-snapshot.schema.json`, `schema_version`
+`1.0.0`) is written out verbatim so the skill's **offline** two-snapshot
+comparison can still consume the result in CI.
+
+The line drawn is determinism: identity, collection and normalisation run on
+the board as a test suite; comparison runs off the board on two artifacts; the
+anomaly/RCA and report stages are out of scope. See
+`Memory_Snapshot/README.md`.
 
 ## Publishing measurements: `send-metrics-to-lava.sh`
 
