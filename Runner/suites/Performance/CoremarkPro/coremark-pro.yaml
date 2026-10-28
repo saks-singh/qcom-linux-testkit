@@ -22,8 +22,12 @@ params:
   # Fetch a .tar.gz holding coremark-pro/ onto the running device first,
   # instead of baking the tree into the image. Needs device networking.
   # CMP_URL_AUTH, if set, is sent as the Authorization header.
+  # CMP_URL_SECRET names a variable in the job's `secrets:` block (which may
+  # hold a remote artifact token name, so the job never carries the secret);
+  # its value is sent as "Authorization: Bearer <value>".
   CMP_URL: ""
   CMP_URL_AUTH: ""
+  CMP_URL_SECRET: ""
   # EEMBC TARGET passed to make. linux64 for 64-bit Arm userspace.
   TARGET: "linux64"
   # Workers for the multicore pass. NPROC means all online CPUs.
@@ -45,6 +49,13 @@ run:
   steps:
     - 'REPO_PATH="$PWD"'
     - 'cd Runner/suites/Performance/CoremarkPro || exit 0'
+    - >
+      if [ -n "$CMP_URL_SECRET" ] && [ -z "$CMP_URL_AUTH" ]; then
+      lava_dir="$(find /lava-* -maxdepth 0 -type d 2>/dev/null | grep -E '^/lava-[0-9]+' | sort | tail -1)";
+      if [ -f "$lava_dir/secrets" ]; then . "$lava_dir/secrets"; fi;
+      eval "cmp_secret=\${$CMP_URL_SECRET:-}";
+      if [ -n "$cmp_secret" ]; then CMP_URL_AUTH="Bearer $cmp_secret"; else echo "CMP_URL_SECRET $CMP_URL_SECRET not found in LAVA secrets"; fi;
+      fi
     - >
       CMP_URL_AUTH="$CMP_URL_AUTH" ./run.sh
       --out-dir "$OUT_DIR"
