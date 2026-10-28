@@ -80,7 +80,8 @@ per marker.
 
 For each unit in `UNITS` (default includes **`systemd-udevd.service`**,
 **`systemd-udev-trigger.service`**, `systemd-udev-settle.service`,
-`local-fs.target`, **`sysinit.target`**, `basic.target`, `multi-user.target`,
+`local-fs.target`, **`sysinit.target`**, **`basic.target`**,
+**`network.target`**, **`sound.target`**, `multi-user.target`,
 `graphical.target`):
 
 | Case id suffix | Property |
@@ -91,6 +92,11 @@ For each unit in `UNITS` (default includes **`systemd-udevd.service`**,
 | `-finish-timestamp` | `InactiveEnterTimestampMonotonic`, for units that completed and left |
 | `-run-duration` | finish − start, i.e. a oneshot's whole run |
 | `-blame-duration` | what `systemd-analyze blame` attributes to it |
+
+`basic.target`, `network.target` and `sound.target` mark when the basic system,
+the network stack and the sound devices came up, e.g.
+`boot-unit-network-target-active-timestamp`; on an image without sound hardware
+`sound.target` is simply never activated and its markers SKIP.
 
 Unit names lose their dots in the case id, because LAVA case ids are flat
 identifiers: `systemd-udev-trigger.service` →

@@ -79,7 +79,7 @@ WAIT_FINISH_SEC="${WAIT_FINISH_SEC:-120}"
 # Units whose start timestamp and duration are published. The udev pair and
 # sysinit.target are the ones usually under investigation; the rest give the
 # surrounding phase boundaries so a regression can be localised.
-UNITS="${UNITS:-systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target multi-user.target graphical.target}"
+UNITS="${UNITS:-systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target network.target sound.target multi-user.target graphical.target}"
 
 # Number of slowest units from systemd-analyze blame to publish as
 # measurements (the full list is always archived).

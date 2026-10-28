@@ -8,10 +8,10 @@ metadata:
     and the kernel log. Covers the firmware/bootloader/kernel/userspace split,
     the in-kernel breakdown (rootfs mount, handover to the init process),
     systemd unit-file load start and finish, the udev services, and
-    sysinit.target. Measures the boot that already happened; nothing here
-    reboots the target. Markers the platform does not have are reported SKIP
-    rather than zero, so an absent UEFI firmware time is not mistaken for an
-    instant one.
+    sysinit.target, basic.target, network.target and sound.target. Measures
+    the boot that already happened; nothing here reboots the target. Markers
+    the platform does not have are reported SKIP rather than zero, so an
+    absent UEFI firmware time is not mistaken for an instant one.
   os:
     - linux
   scope:
@@ -31,7 +31,7 @@ params:
   # this long before giving up.
   WAIT_FINISH_SEC: "120"
 
-  UNITS: "systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target multi-user.target graphical.target"
+  UNITS: "systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target network.target sound.target multi-user.target graphical.target"
 
   BLAME_TOP: "10"
   COLLECT_JOURNAL: "1"
