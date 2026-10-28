@@ -145,6 +145,24 @@ else
     fetch_dir="$OUT_DIR/fetch"
     mkdir -p "$fetch_dir"
     log_info "$TESTNAME: fetching CoreMark-PRO from ${CMP_URL%%\?*}"
+    # Lab boards often boot with the clock at 1970, which makes every TLS
+    # certificate "not yet valid". Take the time from the server's Date
+    # header (no credentials sent) so the real fetch still verifies TLS.
+    if [ "$(date +%Y 2>/dev/null || echo 0)" -lt 2020 ] && command -v curl >/dev/null 2>&1; then
+      srv_date="$(curl -skI --max-time 30 "$CMP_URL" 2>/dev/null \
+        | awk 'tolower($1) == "date:" {
+            # "Date: Tue, 28 Oct 2026 09:00:00 GMT" -> "2026-10-28 09:00:00",
+            # a form both GNU and busybox date -s accept.
+            m = index("JanFebMarAprMayJunJulAugSepOctNovDec", $4)
+            if (m) printf "%04d-%02d-%02d %s\n", $5, (m + 2) / 3, $3, $6
+            exit
+          }')"
+      if [ -n "$srv_date" ] && TZ=UTC date -s "$srv_date" >/dev/null 2>&1; then
+        log_info "$TESTNAME: clock was unset; set from server Date header: $(date)"
+      else
+        log_warn "$TESTNAME: clock is unset and could not be set from the server"
+      fi
+    fi
     if command -v curl >/dev/null 2>&1; then
       if [ -n "$CMP_URL_AUTH" ]; then
         curl -sSfL --retry 3 -H "Authorization: $CMP_URL_AUTH" -o "$fetch_dir/cmp.tar.gz" "$CMP_URL"
