@@ -5,8 +5,10 @@ metadata:
     EEMBC CoreMark-PRO benchmark. Drives the certify-all run and reports the
     MARK RESULTS TABLE as LAVA measurements: MultiCore and SingleCore scores
     in iter/s plus the Scaling ratio between them. Optionally reports every
-    row of the WORKLOAD RESULTS TABLE as well. SKIPs cleanly when the
-    CoreMark-PRO tree is not present in the image.
+    row of the WORKLOAD RESULTS TABLE as well. The tree can be fetched onto
+    the device at run time (CMP_URL); without make and perl, prebuilt
+    workload binaries are run by certify.sh with the same procedure. SKIPs
+    cleanly when no CoreMark-PRO tree can be found or fetched.
   os:
     - linux
   scope:
@@ -17,6 +19,11 @@ params:
   # CoreMark-PRO source tree (the directory containing builds/ and util/).
   # Empty means search the suite dir, /opt, /usr/share and $HOME.
   CMP_DIR: ""
+  # Fetch a .tar.gz holding coremark-pro/ onto the running device first,
+  # instead of baking the tree into the image. Needs device networking.
+  # CMP_URL_AUTH, if set, is sent as the Authorization header.
+  CMP_URL: ""
+  CMP_URL_AUTH: ""
   # EEMBC TARGET passed to make. linux64 for 64-bit Arm userspace.
   TARGET: "linux64"
   # Workers for the multicore pass. NPROC means all online CPUs.
@@ -39,9 +46,10 @@ run:
     - 'REPO_PATH="$PWD"'
     - 'cd Runner/suites/Performance/CoremarkPro || exit 0'
     - >
-      ./run.sh
+      CMP_URL_AUTH="$CMP_URL_AUTH" ./run.sh
       --out-dir "$OUT_DIR"
       --dir "$CMP_DIR"
+      --url "$CMP_URL"
       --target "$TARGET"
       --cores "$CORES"
       --contexts "$CONTEXTS"

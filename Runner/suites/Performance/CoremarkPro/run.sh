@@ -12,7 +12,11 @@
 # - CoreMark-PRO is a source tree driven by make, not a single binary. Point
 #   --dir at the tree (the directory containing builds/ and util/), or use
 #   --run-cmd to supply a completely custom invocation, or --from-log to parse
-#   a run someone else produced.
+#   a run someone else produced. --url fetches a packaged tree onto the
+#   running device instead of baking it into the image.
+# - Without make and perl on the device, prebuilt binaries under
+#   builds/<target>/<toolchain>/bin are run by certify.sh, which follows the
+#   same certify procedure and prints the same tables.
 # - Scaling is MultiCore/SingleCore, so it is the headline number for how well
 #   the platform uses its cores. A scaling figure well below the core count
 #   usually means memory bandwidth or thermal limits, not a CoreMark-PRO fault.
@@ -59,6 +63,8 @@ test_path="$(find_test_case_by_name "$TESTNAME" 2>/dev/null || true)"
 
 OUT_DIR="${OUT_DIR:-$test_path/logs_${TESTNAME}}"
 CMP_DIR="${CMP_DIR:-}"
+CMP_URL="${CMP_URL:-}"
+CMP_URL_AUTH="${CMP_URL_AUTH:-}"
 TARGET="${TARGET:-linux64}"
 CORES="${CORES:-NPROC}"
 CONTEXTS="${CONTEXTS:-}"
@@ -73,6 +79,8 @@ usage() {
 Usage: $0 [OPTIONS]
   --out-dir DIR        output directory (default: $OUT_DIR)
   --dir DIR            CoreMark-PRO source tree (containing builds/ and util/)
+  --url URL            fetch a .tar.gz holding coremark-pro/ onto the device first
+                       (Authorization header from \$CMP_URL_AUTH, if set)
   --target NAME        EEMBC TARGET passed to make (default: $TARGET)
   --cores N|NPROC      worker count for the multicore pass (default: $CORES)
   --contexts N         override contexts; default is derived from --cores
@@ -90,6 +98,7 @@ while [ "$#" -gt 0 ]; do
     -h|--help) usage; exit 0 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --dir) CMP_DIR="$2"; shift 2 ;;
+    --url) CMP_URL="$2"; shift 2 ;;
     --target) TARGET="$2"; shift 2 ;;
     --cores) CORES="$2"; shift 2 ;;
     --contexts) CONTEXTS="$2"; shift 2 ;;
@@ -130,6 +139,34 @@ else
   NCORES="$(bench_resolve_threads "$CORES")"
   [ -n "$CONTEXTS" ] || CONTEXTS="$NCORES"
 
+  # Fetch a packaged tree onto the running device (nothing is added to the
+  # flashed image). The archive must hold a coremark-pro/ directory.
+  if [ -z "$RUN_CMD" ] && [ -n "$CMP_URL" ]; then
+    fetch_dir="$OUT_DIR/fetch"
+    mkdir -p "$fetch_dir"
+    log_info "$TESTNAME: fetching CoreMark-PRO from ${CMP_URL%%\?*}"
+    if command -v curl >/dev/null 2>&1; then
+      if [ -n "$CMP_URL_AUTH" ]; then
+        curl -sSfL --retry 3 -H "Authorization: $CMP_URL_AUTH" -o "$fetch_dir/cmp.tar.gz" "$CMP_URL"
+      else
+        curl -sSfL --retry 3 -o "$fetch_dir/cmp.tar.gz" "$CMP_URL"
+      fi
+    elif command -v wget >/dev/null 2>&1 && [ -z "$CMP_URL_AUTH" ]; then
+      wget -q -O "$fetch_dir/cmp.tar.gz" "$CMP_URL"
+    else
+      false
+    fi
+    rc=$?
+    if [ "$rc" -ne 0 ] || ! tar -xzf "$fetch_dir/cmp.tar.gz" -C "$fetch_dir"; then
+      bench_metric "coremarkpro-fetch" "fail"
+      bench_skip_exit "could not fetch CoreMark-PRO from CMP_URL (no network or bad URL)"
+      exit 0
+    fi
+    rm -f "$fetch_dir/cmp.tar.gz"
+    bench_metric "coremarkpro-fetch" "pass"
+    CMP_DIR="$fetch_dir/coremark-pro"
+  fi
+
   if [ -z "$RUN_CMD" ]; then
     # Locate the CoreMark-PRO tree if one was not given.
     if [ -z "$CMP_DIR" ]; then
@@ -147,13 +184,27 @@ else
       exit 0
     fi
 
-    if ! bench_require_cmds make; then
-      bench_skip_exit "make not available and no --run-cmd given"
-      exit 0
-    fi
-
     log_info "$TESTNAME: tree=$CMP_DIR target=$TARGET cores=$NCORES contexts=$CONTEXTS"
-    RUN_CMD="cd '$CMP_DIR' && make TARGET=$TARGET XCMD='-c$CONTEXTS' certify-all"
+    if command -v make >/dev/null 2>&1 && command -v perl >/dev/null 2>&1 \
+       && [ -f "$CMP_DIR/Makefile" ]; then
+      RUN_CMD="cd '$CMP_DIR' && make TARGET=$TARGET XCMD='-c$CONTEXTS' certify-all"
+    else
+      # No make/perl on the image: run the prebuilt workloads directly with
+      # the same certify procedure (certify.sh).
+      bin_dir=""
+      for d in "$CMP_DIR"/builds/"$TARGET"/*/bin; do
+        if [ -x "$d/core.exe" ]; then
+          bin_dir="$d"
+          break
+        fi
+      done
+      if [ -z "$bin_dir" ]; then
+        bench_skip_exit "make/perl not available and no prebuilt binaries under $CMP_DIR/builds/$TARGET"
+        exit 0
+      fi
+      log_info "$TESTNAME: make/perl not available; running prebuilt binaries in $bin_dir"
+      RUN_CMD="sh '$SCRIPT_DIR/certify.sh' --bin-dir '$bin_dir' --contexts $CONTEXTS"
+    fi
   else
     log_info "$TESTNAME: using custom run command"
   fi
