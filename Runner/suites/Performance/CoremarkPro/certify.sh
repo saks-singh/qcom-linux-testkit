@@ -5,6 +5,10 @@
 # make/perl-free CoreMark-PRO certify run, for images that carry prebuilt
 # CoreMark-PRO workload binaries but no make or perl.
 #
+# The workload binaries may be named <workload>.exe (an EEMBC build tree's
+# builds/<target>/<toolchain>/bin) or plain <workload> (as the meta-oe
+# coremark-pro recipe installs them into /usr/bin).
+#
 # Follows upstream's certify-all (Makefile.mak certify-process/wcertify-%,
 # util/perl/cert_median.pl, util/perl/cert_mark.pl):
 # - for each concurrency type, single (-c1 -w1) and best (-c<contexts>):
@@ -85,7 +89,8 @@ for contype in single best; do
   printf '%s\n' "$WORKLOADS" | while IFS=: read -r wld weight; do
     [ -n "$wld" ] || continue
     bin="./$wld.exe"
-    if [ ! -x "$bin" ]; then
+    [ -x "$bin" ] || bin="./$wld"
+    if [ ! -x "$bin" ] || [ -d "$bin" ]; then
       echo "	$wld: binary missing"
       echo "$wld $contype NA 1" >> "$SCORES"
       continue

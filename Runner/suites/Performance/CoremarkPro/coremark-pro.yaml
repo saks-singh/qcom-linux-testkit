@@ -2,13 +2,12 @@ metadata:
   name: coremark-pro
   format: "Lava-Test Test Definition 1.0"
   description: >
-    EEMBC CoreMark-PRO benchmark. Drives the certify-all run and reports the
-    MARK RESULTS TABLE as LAVA measurements: MultiCore and SingleCore scores
-    in iter/s plus the Scaling ratio between them. Optionally reports every
-    row of the WORKLOAD RESULTS TABLE as well. The tree can be fetched onto
-    the device at run time (CMP_URL); without make and perl, prebuilt
-    workload binaries are run by certify.sh with the same procedure. SKIPs
-    cleanly when no CoreMark-PRO tree can be found or fetched.
+    EEMBC CoreMark-PRO benchmark. Runs the certify-all procedure and reports
+    the MARK RESULTS TABLE as LAVA measurements: MultiCore and SingleCore
+    scores in iter/s plus the Scaling ratio between them. Optionally reports
+    every row of the WORKLOAD RESULTS TABLE as well. By default it runs the
+    workload binaries the image ships in /usr/bin (meta-oe coremark-pro);
+    SKIPs cleanly when they are not present.
   os:
     - linux
   scope:
@@ -16,26 +15,19 @@ metadata:
 
 params:
   OUT_DIR: "./logs_CoremarkPro"
-  # CoreMark-PRO source tree (the directory containing builds/ and util/).
-  # Empty means search the suite dir, /opt, /usr/share and $HOME.
+  # Directory holding the nine workload binaries (<workload> or
+  # <workload>.exe). Empty means find them in /usr/bin or on PATH.
+  CMP_BIN_DIR: ""
+  # CoreMark-PRO source tree (the directory containing builds/ and util/),
+  # used instead of image binaries. Empty means do not use a tree.
   CMP_DIR: ""
-  # Fetch a .tar.gz holding coremark-pro/ onto the running device first,
-  # instead of baking the tree into the image. Needs device networking.
-  # CMP_URL_AUTH, if set, is sent as the Authorization header.
-  # CMP_URL_SECRET names a variable in the job's `secrets:` block (which may
-  # hold a remote artifact token name, so the job never carries the secret);
-  # its value is sent as "Authorization: Bearer <value>".
-  CMP_URL: ""
-  CMP_URL_AUTH: ""
-  CMP_URL_SECRET: ""
-  # EEMBC TARGET passed to make. linux64 for 64-bit Arm userspace.
+  # EEMBC TARGET passed to make (source tree only).
   TARGET: "linux64"
   # Workers for the multicore pass. NPROC means all online CPUs.
   CORES: "NPROC"
   # Override the -c context count; empty derives it from CORES.
   CONTEXTS: ""
-  # Replace the built-in make invocation entirely, if your image ships
-  # CoreMark-PRO in some other form.
+  # Replace the built-in invocation entirely.
   RUN_CMD: ""
   # Parse an existing log instead of running anything.
   FROM_LOG: ""
@@ -50,17 +42,10 @@ run:
     - 'REPO_PATH="$PWD"'
     - 'cd Runner/suites/Performance/CoremarkPro || exit 0'
     - >
-      if [ -n "$CMP_URL_SECRET" ] && [ -z "$CMP_URL_AUTH" ]; then
-      lava_dir="$(find /lava-* -maxdepth 0 -type d 2>/dev/null | grep -E '^/lava-[0-9]+' | sort | tail -1)";
-      if [ -f "$lava_dir/secrets" ]; then . "$lava_dir/secrets"; fi;
-      eval "cmp_secret=\${$CMP_URL_SECRET:-}";
-      if [ -n "$cmp_secret" ]; then CMP_URL_AUTH="Bearer $cmp_secret"; else echo "CMP_URL_SECRET $CMP_URL_SECRET not found in LAVA secrets"; fi;
-      fi
-    - >
-      CMP_URL_AUTH="$CMP_URL_AUTH" ./run.sh
+      ./run.sh
       --out-dir "$OUT_DIR"
+      --bin-dir "$CMP_BIN_DIR"
       --dir "$CMP_DIR"
-      --url "$CMP_URL"
       --target "$TARGET"
       --cores "$CORES"
       --contexts "$CONTEXTS"

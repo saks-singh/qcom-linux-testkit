@@ -9,14 +9,15 @@
 #
 # Notes:
 # - Always exits 0 (LAVA-friendly). Use CoremarkPro.res for gating.
-# - CoreMark-PRO is a source tree driven by make, not a single binary. Point
-#   --dir at the tree (the directory containing builds/ and util/), or use
-#   --run-cmd to supply a completely custom invocation, or --from-log to parse
-#   a run someone else produced. --url fetches a packaged tree onto the
-#   running device instead of baking it into the image.
-# - Without make and perl on the device, prebuilt binaries under
-#   builds/<target>/<toolchain>/bin are run by certify.sh, which follows the
-#   same certify procedure and prints the same tables.
+# - qcom-distro images ship the nine CoreMark-PRO workload binaries in
+#   /usr/bin (meta-oe coremark-pro, via packagegroup-qcom-benchmark). By
+#   default they are found there (or anywhere on PATH) and run by certify.sh,
+#   which follows upstream's certify-all procedure and prints the same tables.
+# - --bin-dir points at another directory of workload binaries; --dir at an
+#   EEMBC source tree (driven by make certify-all when make and perl exist,
+#   otherwise its prebuilt builds/<target>/<toolchain>/bin is used); --run-cmd
+#   supplies a completely custom invocation; --from-log parses a run someone
+#   else produced.
 # - Scaling is MultiCore/SingleCore, so it is the headline number for how well
 #   the platform uses its cores. A scaling figure well below the core count
 #   usually means memory bandwidth or thermal limits, not a CoreMark-PRO fault.
@@ -63,8 +64,7 @@ test_path="$(find_test_case_by_name "$TESTNAME" 2>/dev/null || true)"
 
 OUT_DIR="${OUT_DIR:-$test_path/logs_${TESTNAME}}"
 CMP_DIR="${CMP_DIR:-}"
-CMP_URL="${CMP_URL:-}"
-CMP_URL_AUTH="${CMP_URL_AUTH:-}"
+CMP_BIN_DIR="${CMP_BIN_DIR:-}"
 TARGET="${TARGET:-linux64}"
 CORES="${CORES:-NPROC}"
 CONTEXTS="${CONTEXTS:-}"
@@ -78,9 +78,9 @@ usage() {
   cat <<EOF
 Usage: $0 [OPTIONS]
   --out-dir DIR        output directory (default: $OUT_DIR)
+  --bin-dir DIR        directory holding the workload binaries
+                       (default: found in /usr/bin or on PATH)
   --dir DIR            CoreMark-PRO source tree (containing builds/ and util/)
-  --url URL            fetch a .tar.gz holding coremark-pro/ onto the device first
-                       (Authorization header from \$CMP_URL_AUTH, if set)
   --target NAME        EEMBC TARGET passed to make (default: $TARGET)
   --cores N|NPROC      worker count for the multicore pass (default: $CORES)
   --contexts N         override contexts; default is derived from --cores
@@ -97,8 +97,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --bin-dir) CMP_BIN_DIR="$2"; shift 2 ;;
     --dir) CMP_DIR="$2"; shift 2 ;;
-    --url) CMP_URL="$2"; shift 2 ;;
     --target) TARGET="$2"; shift 2 ;;
     --cores) CORES="$2"; shift 2 ;;
     --contexts) CONTEXTS="$2"; shift 2 ;;
@@ -139,89 +139,80 @@ else
   NCORES="$(bench_resolve_threads "$CORES")"
   [ -n "$CONTEXTS" ] || CONTEXTS="$NCORES"
 
-  # Fetch a packaged tree onto the running device (nothing is added to the
-  # flashed image). The archive must hold a coremark-pro/ directory.
-  if [ -z "$RUN_CMD" ] && [ -n "$CMP_URL" ]; then
-    fetch_dir="$OUT_DIR/fetch"
-    mkdir -p "$fetch_dir"
-    log_info "$TESTNAME: fetching CoreMark-PRO from ${CMP_URL%%\?*}"
-    # Lab boards often boot with the clock at 1970, which makes every TLS
-    # certificate "not yet valid". Take the time from the server's Date
-    # header (no credentials sent) so the real fetch still verifies TLS.
-    if [ "$(date +%Y 2>/dev/null || echo 0)" -lt 2020 ] && command -v curl >/dev/null 2>&1; then
-      srv_date="$(curl -skI --max-time 30 "$CMP_URL" 2>/dev/null \
-        | awk 'tolower($1) == "date:" {
-            # "Date: Tue, 28 Oct 2026 09:00:00 GMT" -> "2026-10-28 09:00:00",
-            # a form both GNU and busybox date -s accept.
-            m = index("JanFebMarAprMayJunJulAugSepOctNovDec", $4)
-            if (m) printf "%04d-%02d-%02d %s\n", $5, (m + 2) / 3, $3, $6
-            exit
-          }')"
-      if [ -n "$srv_date" ] && TZ=UTC date -s "$srv_date" >/dev/null 2>&1; then
-        log_info "$TESTNAME: clock was unset; set from server Date header: $(date)"
-      else
-        log_warn "$TESTNAME: clock is unset and could not be set from the server"
+  # Workloads certify.sh runs; a directory holding all of them, named
+  # <workload> or <workload>.exe, is a usable binary directory.
+  CMP_WORKLOADS="cjpeg-rose7-preset core linear_alg-mid-100x100-sp loops-all-mid-10k-sp nnet_test parser-125k radix2-big-64k sha-test zip-test"
+
+  has_workloads() {
+    for w in $CMP_WORKLOADS; do
+      if [ ! -x "$1/$w" ] && [ ! -x "$1/$w.exe" ]; then
+        return 1
       fi
-    fi
-    if command -v curl >/dev/null 2>&1; then
-      if [ -n "$CMP_URL_AUTH" ]; then
-        curl -sSfL --retry 3 -H "Authorization: $CMP_URL_AUTH" -o "$fetch_dir/cmp.tar.gz" "$CMP_URL"
-      else
-        curl -sSfL --retry 3 -o "$fetch_dir/cmp.tar.gz" "$CMP_URL"
-      fi
-    elif command -v wget >/dev/null 2>&1 && [ -z "$CMP_URL_AUTH" ]; then
-      wget -q -O "$fetch_dir/cmp.tar.gz" "$CMP_URL"
-    else
-      false
-    fi
-    rc=$?
-    if [ "$rc" -ne 0 ] || ! tar -xzf "$fetch_dir/cmp.tar.gz" -C "$fetch_dir"; then
-      bench_metric "coremarkpro-fetch" "fail"
-      bench_skip_exit "could not fetch CoreMark-PRO from CMP_URL (no network or bad URL)"
-      exit 0
-    fi
-    rm -f "$fetch_dir/cmp.tar.gz"
-    bench_metric "coremarkpro-fetch" "pass"
-    CMP_DIR="$fetch_dir/coremark-pro"
-  fi
+    done
+    return 0
+  }
 
   if [ -z "$RUN_CMD" ]; then
-    # Locate the CoreMark-PRO tree if one was not given.
-    if [ -z "$CMP_DIR" ]; then
-      for d in "$SCRIPT_DIR/coremark-pro" "/opt/coremark-pro" \
-               "/usr/share/coremark-pro" "$HOME/coremark-pro"; do
-        if [ -d "$d" ] && [ -d "$d/builds" ]; then
-          CMP_DIR="$d"
-          break
-        fi
-      done
-    fi
-
-    if [ -z "$CMP_DIR" ] || [ ! -d "$CMP_DIR" ]; then
-      bench_skip_exit "CoreMark-PRO tree not found (use --dir, --run-cmd or --from-log)"
-      exit 0
-    fi
-
-    log_info "$TESTNAME: tree=$CMP_DIR target=$TARGET cores=$NCORES contexts=$CONTEXTS"
-    if command -v make >/dev/null 2>&1 && command -v perl >/dev/null 2>&1 \
-       && [ -f "$CMP_DIR/Makefile" ]; then
-      RUN_CMD="cd '$CMP_DIR' && make TARGET=$TARGET XCMD='-c$CONTEXTS' certify-all"
-    else
-      # No make/perl on the image: run the prebuilt workloads directly with
-      # the same certify procedure (certify.sh).
-      bin_dir=""
-      for d in "$CMP_DIR"/builds/"$TARGET"/*/bin; do
-        if [ -x "$d/core.exe" ]; then
-          bin_dir="$d"
-          break
-        fi
-      done
-      if [ -z "$bin_dir" ]; then
-        bench_skip_exit "make/perl not available and no prebuilt binaries under $CMP_DIR/builds/$TARGET"
+    if [ -n "$CMP_BIN_DIR" ]; then
+      if ! has_workloads "$CMP_BIN_DIR"; then
+        bench_skip_exit "CoreMark-PRO workload binaries not all present in --bin-dir $CMP_BIN_DIR"
         exit 0
       fi
-      log_info "$TESTNAME: make/perl not available; running prebuilt binaries in $bin_dir"
-      RUN_CMD="sh '$SCRIPT_DIR/certify.sh' --bin-dir '$bin_dir' --contexts $CONTEXTS"
+    elif [ -z "$CMP_DIR" ]; then
+      # Binaries shipped in the image: /usr/bin first, then wherever PATH
+      # finds them.
+      for d in /usr/bin /usr/local/bin; do
+        if has_workloads "$d"; then
+          CMP_BIN_DIR="$d"
+          break
+        fi
+      done
+      if [ -z "$CMP_BIN_DIR" ]; then
+        p="$(command -v loops-all-mid-10k-sp 2>/dev/null || true)"
+        if [ -n "$p" ] && has_workloads "$(dirname "$p")"; then
+          CMP_BIN_DIR="$(dirname "$p")"
+        fi
+      fi
+      # Otherwise fall back to a CoreMark-PRO source tree.
+      if [ -z "$CMP_BIN_DIR" ]; then
+        for d in "$SCRIPT_DIR/coremark-pro" "/opt/coremark-pro" \
+                 "/usr/share/coremark-pro" "$HOME/coremark-pro"; do
+          if [ -d "$d" ] && [ -d "$d/builds" ]; then
+            CMP_DIR="$d"
+            break
+          fi
+        done
+      fi
+    fi
+
+    if [ -z "$CMP_BIN_DIR" ]; then
+      if [ -z "$CMP_DIR" ] || [ ! -d "$CMP_DIR" ]; then
+        bench_skip_exit "CoreMark-PRO binaries not found in the image (use --bin-dir, --dir, --run-cmd or --from-log)"
+        exit 0
+      fi
+
+      if command -v make >/dev/null 2>&1 && command -v perl >/dev/null 2>&1 \
+         && [ -f "$CMP_DIR/Makefile" ]; then
+        log_info "$TESTNAME: tree=$CMP_DIR target=$TARGET cores=$NCORES contexts=$CONTEXTS"
+        RUN_CMD="cd '$CMP_DIR' && make TARGET=$TARGET XCMD='-c$CONTEXTS' certify-all"
+      else
+        # No make/perl: run the tree's prebuilt workloads with certify.sh.
+        for d in "$CMP_DIR"/builds/"$TARGET"/*/bin; do
+          if has_workloads "$d"; then
+            CMP_BIN_DIR="$d"
+            break
+          fi
+        done
+        if [ -z "$CMP_BIN_DIR" ]; then
+          bench_skip_exit "make/perl not available and no prebuilt binaries under $CMP_DIR/builds/$TARGET"
+          exit 0
+        fi
+      fi
+    fi
+
+    if [ -z "$RUN_CMD" ]; then
+      log_info "$TESTNAME: running workload binaries in $CMP_BIN_DIR cores=$NCORES contexts=$CONTEXTS"
+      RUN_CMD="sh '$SCRIPT_DIR/certify.sh' --bin-dir '$CMP_BIN_DIR' --contexts $CONTEXTS"
     fi
   else
     log_info "$TESTNAME: using custom run command"
