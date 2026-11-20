@@ -8,7 +8,9 @@ metadata:
     and the kernel log. Covers the firmware/bootloader/kernel/userspace split,
     the in-kernel breakdown (rootfs mount, handover to the init process),
     systemd unit-file load start and finish, the udev services, and
-    sysinit.target, basic.target, network.target and sound.target. Measures
+    sysinit.target, basic.target, network.target and sound.target, the
+    systemd-to-sysinit span, and the time until PipeWire, Weston and
+    qt-camserver are active. Measures
     the boot that already happened; nothing here reboots the target. Markers
     the platform does not have are reported SKIP rather than zero, so an
     absent UEFI firmware time is not mistaken for an instant one.
@@ -33,6 +35,10 @@ params:
 
   UNITS: "systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target network.target sound.target multi-user.target graphical.target"
 
+  # Services whose time from kernel start until active is published as
+  # boot-app-<name>-active-timestamp. Absent services read SKIP.
+  APPS: "pipewire.service weston.service qt-camserver.service"
+
   BLAME_TOP: "10"
   COLLECT_JOURNAL: "1"
 
@@ -46,6 +52,7 @@ run:
       --target "$TARGET"
       --wait-finish-sec "$WAIT_FINISH_SEC"
       --units "$UNITS"
+      --apps "$APPS"
       --blame-top "$BLAME_TOP"
       --collect-journal "$COLLECT_JOURNAL"
       || true

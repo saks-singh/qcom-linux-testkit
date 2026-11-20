@@ -81,6 +81,12 @@ WAIT_FINISH_SEC="${WAIT_FINISH_SEC:-120}"
 # surrounding phase boundaries so a regression can be localised.
 UNITS="${UNITS:-systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service local-fs.target sysinit.target basic.target network.target sound.target multi-user.target graphical.target}"
 
+# Services whose "time till ready" is a headline figure. Each is published as
+# boot-app-<name>-{start,active}-timestamp, the case id taken from the name as
+# given here so it stays stable even when the unit is found under a variant
+# name (see resolve_unit). A service the image does not ship reads SKIP.
+APPS="${APPS:-pipewire.service weston.service qt-camserver.service}"
+
 # Number of slowest units from systemd-analyze blame to publish as
 # measurements (the full list is always archived).
 BLAME_TOP="${BLAME_TOP:-10}"
@@ -95,6 +101,8 @@ Usage: $0 [OPTIONS]
   --wait-finish-sec N  how long to wait for systemd to call the boot finished
                        (default: $WAIT_FINISH_SEC)
   --units "A B C"      units to measure (default: $UNITS)
+  --apps "A B C"       services whose time-till-active is published
+                       (default: $APPS)
   --blame-top N        publish the N slowest units from blame (default: $BLAME_TOP)
   --collect-journal 0|1 archive the boot journal (default: $COLLECT_JOURNAL)
   -h, --help
@@ -108,6 +116,7 @@ while [ "$#" -gt 0 ]; do
     --target) TARGET="$2"; shift 2 ;;
     --wait-finish-sec) WAIT_FINISH_SEC="$2"; shift 2 ;;
     --units) UNITS="$2"; shift 2 ;;
+    --apps) APPS="$2"; shift 2 ;;
     --blame-top) BLAME_TOP="$2"; shift 2 ;;
     --collect-journal) COLLECT_JOURNAL="$2"; shift 2 ;;
     *)
@@ -603,6 +612,79 @@ else
   log_warn "$TESTNAME: systemctl unavailable; per-unit markers skipped"
 fi
 
+# systemd starting up -> sysinit.target active: early userspace (udev, local
+# filesystems, journald, tmpfiles) before ordinary services may start. Read
+# directly rather than relying on sysinit.target being in UNITS.
+if [ "$HAVE_SYSTEMCTL" = "1" ]; then
+  publish_dur_us "boot-systemd-to-sysinit-duration" "$USERSPACE_TS_US"     "$(sd_unit_prop sysinit.target ActiveEnterTimestampMonotonic)" || true
+else
+  bench_metric "boot-systemd-to-sysinit-duration" "skip"
+fi
+
+# ------------------------------------------------- application services
+
+log_info "$TESTNAME: --- application services ---"
+
+# resolve_unit <name>: the loaded unit for <name>, or nothing. Tries the exact
+# name, then the name with a .service suffix, then any loaded service whose
+# name contains the stem - images package the same daemon under slightly
+# different unit names (qt-camserver vs qtcamserver@0 and the like).
+resolve_unit() {
+  _n="$1"
+  for _c in "$_n" "${_n%.service}.service"; do
+    _ls="$(sd_unit_prop "$_c" LoadState)"
+    if [ -n "$_ls" ] && [ "$_ls" != "not-found" ]; then
+      printf '%s
+' "$_c"
+      return 0
+    fi
+  done
+
+  _stem="${_n%.*}"
+  _alt="$(systemctl list-units --all --no-legend --plain --type=service 2>/dev/null |
+    awk -v s="$_stem" '
+      { u = $1; k = u; gsub(/[-_]/, "", k); t = s; gsub(/[-_]/, "", t) }
+      index(k, t) > 0 { print u; exit }
+    ' 2>/dev/null)"
+  [ -n "$_alt" ] || return 1
+  printf '%s
+' "$_alt"
+}
+
+APP_SUMMARY=""
+for a in $APPS; do
+  id="boot-app-$(sanitize_id "${a%.service}")"
+
+  u=""
+  [ "$HAVE_SYSTEMCTL" = "1" ] && u="$(resolve_unit "$a" || true)"
+
+  if [ -z "$u" ]; then
+    log_info "$TESTNAME: service $a not present on this image"
+    bench_metric "${id}-start-timestamp" "skip"
+    bench_metric "${id}-active-timestamp" "skip"
+    APP_SUMMARY="${APP_SUMMARY}${a}: not present
+"
+    continue
+  fi
+
+  [ "$u" = "$a" ] || log_info "$TESTNAME: service $a measured as $u"
+
+  start_us="$(sd_unit_prop "$u" InactiveExitTimestampMonotonic)"
+  active_us="$(sd_unit_prop "$u" ActiveEnterTimestampMonotonic)"
+
+  # Socket-activated services (pipewire, weston here) start only when a client
+  # connects. A unit that has not started yet keeps both at 0, which reads SKIP
+  # - it is not part of this boot's critical path.
+  publish_ts "${id}-start-timestamp" "$start_us" || true
+  if publish_ts "${id}-active-timestamp" "$active_us"; then
+    APP_SUMMARY="${APP_SUMMARY}${a} (${u}): active at $(us_to_s "$active_us") s
+"
+  else
+    APP_SUMMARY="${APP_SUMMARY}${a} (${u}): not started during boot
+"
+  fi
+done
+
 # ------------------------------------------------- targets reached
 
 log_info "$TESTNAME: --- targets ---"
@@ -675,6 +757,10 @@ summary="$OUT_DIR/summary.txt"
   echo "rootfs mounted         : ${ROOTFS_TS:-unavailable}"
   echo "unused memory freed    : ${FREEING_TS:-unavailable}"
   echo "init process started   : ${INIT_TS:-unavailable}"
+  echo
+  echo "# application services (time from kernel start until active)"
+  printf '%s' "${APP_SUMMARY:-(none)
+}"
   echo
   echo "# note: firmware and loader durations come from UEFI variables. A board"
   echo "# that does not boot through UEFI has no such figure, and those cases"

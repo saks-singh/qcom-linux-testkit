@@ -29,6 +29,28 @@ Firmware and bootloader happen **before** that zero. systemd reports them as
 durations only (read out of UEFI variables); they have no timestamp on this
 scale.
 
+## Headline markers
+
+These eleven are the ones the reports and the lava-nightly dashboard treat as
+the suite's key results and trend over time. Everything else below stays
+available in the detailed results.
+
+| Marker | Case id |
+|---|---|
+| Firmware duration | `boot-phase-firmware-duration` |
+| Loader duration | `boot-phase-loader-duration` |
+| Kernel → PID 1 duration | `boot-phase-kernel-duration` |
+| Initramfs duration | `boot-phase-initrd-duration` (SKIP without an initramfs) |
+| systemd → sysinit.target duration | `boot-systemd-to-sysinit-duration` |
+| PID 1 timestamp | `boot-kernel-init-process-timestamp` (kernel log `Run /sbin/init as init process`) |
+| sysinit.target timestamp | `boot-unit-sysinit-target-active-timestamp` |
+| multi-user.target timestamp | `boot-unit-multi-user-target-active-timestamp` |
+| Time till PipeWire | `boot-app-pipewire-active-timestamp` |
+| Time till Weston | `boot-app-weston-active-timestamp` |
+| Time till qt-camserver | `boot-app-qt-camserver-active-timestamp` |
+
+Timestamps are seconds from kernel start; durations are spans.
+
 ## What is published
 
 ### Phase durations, from `systemd-analyze time`
@@ -69,6 +91,7 @@ causes.
 | `boot-kernel-init-process-timestamp` | `Run /sbin/init as init process` — **`/init` as a process** |
 | `boot-kernel-rootfs-mounted-to-init-duration` | derived |
 | `boot-init-to-systemd-duration` | init handover → `UserspaceTimestampMonotonic` |
+| `boot-systemd-to-sysinit-duration` | `UserspaceTimestampMonotonic` → `sysinit.target` `ActiveEnterTimestampMonotonic` |
 
 The kernel log comes from `dmesg`, falling back to `journalctl -k -b -o
 short-monotonic` when `dmesg` is restricted (`kernel.dmesg_restrict`) — both
@@ -108,6 +131,26 @@ attributes to the unit, which for a `Type=oneshot` is the whole run and for
 `Type=notify` ends at the notification. Where they disagree, the difference is
 the interesting part.
 
+### Application services
+
+For each service in `APPS` (default `pipewire.service weston.service
+qt-camserver.service`):
+
+| Case id | Property |
+|---|---|
+| `boot-app-<name>-start-timestamp` | `InactiveExitTimestampMonotonic` — it was started |
+| `boot-app-<name>-active-timestamp` | `ActiveEnterTimestampMonotonic` — **time till the service is up** |
+
+`<name>` is the entry from `APPS` without `.service`, so the id stays the same
+when the unit is found under a variant name. When the exact unit is not
+installed, the suite takes the first loaded service whose name contains the
+same letters (dashes and underscores ignored), and logs which unit it used.
+A service the image does not ship SKIPs.
+
+PipeWire and Weston are socket-activated on qcom-multimedia images. They start
+when their first client connects, so the timestamp is when that happened during
+boot. A service nothing connected to before the measurement SKIPs.
+
 ### Targets and the slowest units
 
 - `boot-target-<target>-reached-after` for `TARGET`
@@ -135,6 +178,7 @@ headless Yocto build. Both SKIP, and the suite still PASSes.
 ```sh
 cd Runner/suites/Performance/Boot_Time_Markers
 ./run.sh --out-dir /tmp/boot --target multi-user.target
+./run.sh --apps "pipewire.service weston.service my-app.service"
 cat Boot_Time_Markers.res
 cat /tmp/boot/summary.txt
 ```
